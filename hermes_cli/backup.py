@@ -230,8 +230,6 @@ def _detect_prefix(zf: zipfile.ZipFile) -> str:
 
     # Find common prefix
     parts_list = [Path(n).parts for n in names]
-    if not parts_list:
-        return ""
 
     # Check if all entries share a common first directory
     first_parts = {p[0] for p in parts_list if len(p) > 1}

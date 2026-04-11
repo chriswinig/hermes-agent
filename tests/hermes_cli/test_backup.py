@@ -458,6 +458,28 @@ class TestRoundTrip:
 # Validate / detect-prefix unit tests
 # ---------------------------------------------------------------------------
 
+class TestFormatSize:
+    def test_bytes(self):
+        from hermes_cli.backup import _format_size
+        assert _format_size(512) == "512 B"
+
+    def test_kilobytes(self):
+        from hermes_cli.backup import _format_size
+        assert "KB" in _format_size(2048)
+
+    def test_megabytes(self):
+        from hermes_cli.backup import _format_size
+        assert "MB" in _format_size(5 * 1024 * 1024)
+
+    def test_gigabytes(self):
+        from hermes_cli.backup import _format_size
+        assert "GB" in _format_size(3 * 1024 ** 3)
+
+    def test_terabytes(self):
+        from hermes_cli.backup import _format_size
+        assert "TB" in _format_size(2 * 1024 ** 4)
+
+
 class TestValidation:
     def test_validate_with_config(self):
         """Zip with config.yaml passes validation."""
@@ -523,3 +545,249 @@ class TestValidation:
         buf.seek(0)
         with zipfile.ZipFile(buf, "r") as zf:
             assert _detect_prefix(zf) == ""
+
+    def test_detect_prefix_only_dirs(self):
+        """Prefix detection returns empty for zip with only directory entries."""
+        import io
+        from hermes_cli.backup import _detect_prefix
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            # Only directory entries (trailing slash)
+            zf.writestr(".hermes/", "")
+            zf.writestr(".hermes/skills/", "")
+        buf.seek(0)
+        with zipfile.ZipFile(buf, "r") as zf:
+            assert _detect_prefix(zf) == ""
+
+
+# ---------------------------------------------------------------------------
+# Edge case tests for uncovered paths
+# ---------------------------------------------------------------------------
+
+class TestBackupEdgeCases:
+    def test_nonexistent_hermes_home(self, tmp_path, monkeypatch):
+        """Backup exits when hermes home doesn't exist."""
+        fake_home = tmp_path / "nonexistent" / ".hermes"
+        monkeypatch.setenv("HERMES_HOME", str(fake_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "nonexistent")
+
+        args = Namespace(output=str(tmp_path / "out.zip"))
+
+        from hermes_cli.backup import run_backup
+        with pytest.raises(SystemExit):
+            run_backup(args)
+
+    def test_output_is_directory(self, tmp_path, monkeypatch):
+        """When output path is a directory, zip is created inside it."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("model: test\n")
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        out_dir = tmp_path / "backups"
+        out_dir.mkdir()
+
+        args = Namespace(output=str(out_dir))
+
+        from hermes_cli.backup import run_backup
+        run_backup(args)
+
+        zips = list(out_dir.glob("hermes-backup-*.zip"))
+        assert len(zips) == 1
+
+    def test_output_without_zip_suffix(self, tmp_path, monkeypatch):
+        """Output path without .zip gets suffix appended."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("model: test\n")
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        out_path = tmp_path / "mybackup.tar"
+        args = Namespace(output=str(out_path))
+
+        from hermes_cli.backup import run_backup
+        run_backup(args)
+
+        # Should have .tar.zip suffix
+        assert (tmp_path / "mybackup.tar.zip").exists()
+
+    def test_empty_hermes_home(self, tmp_path, monkeypatch):
+        """Backup handles empty hermes home (no files to back up)."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        # Only excluded dirs, no actual files
+        (hermes_home / "__pycache__").mkdir()
+        (hermes_home / "__pycache__" / "foo.pyc").write_bytes(b"\x00")
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        args = Namespace(output=str(tmp_path / "out.zip"))
+
+        from hermes_cli.backup import run_backup
+        run_backup(args)
+
+        # No zip should be created
+        assert not (tmp_path / "out.zip").exists()
+
+    def test_permission_error_during_backup(self, tmp_path, monkeypatch):
+        """Backup handles permission errors gracefully."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("model: test\n")
+
+        # Create an unreadable file
+        bad_file = hermes_home / "secret.db"
+        bad_file.write_text("data")
+        bad_file.chmod(0o000)
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        out_zip = tmp_path / "out.zip"
+        args = Namespace(output=str(out_zip))
+
+        from hermes_cli.backup import run_backup
+        try:
+            run_backup(args)
+        finally:
+            # Restore permissions for cleanup
+            bad_file.chmod(0o644)
+
+        # Zip should still be created with the readable files
+        assert out_zip.exists()
+
+    def test_skips_output_zip_inside_hermes(self, tmp_path, monkeypatch):
+        """Backup skips its own output zip if it's inside hermes root."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("model: test\n")
+
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        # Output inside hermes home
+        out_zip = hermes_home / "backup.zip"
+        args = Namespace(output=str(out_zip))
+
+        from hermes_cli.backup import run_backup
+        run_backup(args)
+
+        # The zip should exist but not contain itself
+        assert out_zip.exists()
+        with zipfile.ZipFile(out_zip, "r") as zf:
+            assert "backup.zip" not in zf.namelist()
+
+
+class TestImportEdgeCases:
+    def _make_backup_zip(self, zip_path: Path, files: dict[str, str | bytes]) -> None:
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for name, content in files.items():
+                zf.writestr(name, content)
+
+    def test_not_a_zip(self, tmp_path, monkeypatch):
+        """Import rejects a non-zip file."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+        not_zip = tmp_path / "fake.zip"
+        not_zip.write_text("this is not a zip")
+
+        args = Namespace(zipfile=str(not_zip), force=True)
+
+        from hermes_cli.backup import run_import
+        with pytest.raises(SystemExit):
+            run_import(args)
+
+    def test_eof_during_confirmation(self, tmp_path, monkeypatch):
+        """Import handles EOFError during confirmation prompt."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / "config.yaml").write_text("existing\n")
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        zip_path = tmp_path / "backup.zip"
+        self._make_backup_zip(zip_path, {"config.yaml": "new\n"})
+
+        args = Namespace(zipfile=str(zip_path), force=False)
+
+        from hermes_cli.backup import run_import
+        with patch("builtins.input", side_effect=EOFError):
+            with pytest.raises(SystemExit):
+                run_import(args)
+
+    def test_keyboard_interrupt_during_confirmation(self, tmp_path, monkeypatch):
+        """Import handles KeyboardInterrupt during confirmation prompt."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        (hermes_home / ".env").write_text("KEY=val\n")
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        zip_path = tmp_path / "backup.zip"
+        self._make_backup_zip(zip_path, {"config.yaml": "new\n"})
+
+        args = Namespace(zipfile=str(zip_path), force=False)
+
+        from hermes_cli.backup import run_import
+        with patch("builtins.input", side_effect=KeyboardInterrupt):
+            with pytest.raises(SystemExit):
+                run_import(args)
+
+    def test_permission_error_during_import(self, tmp_path, monkeypatch):
+        """Import handles permission errors during extraction."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        # Create a read-only directory so extraction fails
+        locked_dir = hermes_home / "locked"
+        locked_dir.mkdir()
+        locked_dir.chmod(0o555)
+
+        zip_path = tmp_path / "backup.zip"
+        self._make_backup_zip(zip_path, {
+            "config.yaml": "model: test\n",
+            "locked/secret.txt": "data",
+        })
+
+        args = Namespace(zipfile=str(zip_path), force=True)
+
+        from hermes_cli.backup import run_import
+        try:
+            run_import(args)
+        finally:
+            locked_dir.chmod(0o755)
+
+        # config.yaml should still be restored despite the error
+        assert (hermes_home / "config.yaml").exists()
+
+    def test_progress_with_many_files(self, tmp_path, monkeypatch):
+        """Import shows progress with 500+ files."""
+        hermes_home = tmp_path / ".hermes"
+        hermes_home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        zip_path = tmp_path / "big.zip"
+        files = {"config.yaml": "model: test\n"}
+        for i in range(600):
+            files[f"sessions/s{i:04d}.json"] = "{}"
+
+        self._make_backup_zip(zip_path, files)
+
+        args = Namespace(zipfile=str(zip_path), force=True)
+
+        from hermes_cli.backup import run_import
+        run_import(args)
+
+        assert (hermes_home / "config.yaml").exists()
+        assert (hermes_home / "sessions" / "s0599.json").exists()
