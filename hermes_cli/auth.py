@@ -2983,7 +2983,6 @@ def _nous_device_code_login(
         open_browser = False
 
     print(f"Starting Hermes login via {pconfig.name}...")
-    print(f"Portal: {portal_base_url}")
     if insecure:
         print("TLS verification: disabled (--insecure)")
     elif ca_bundle:

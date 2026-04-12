@@ -1430,8 +1430,6 @@ def _model_flow_nous(config, current_model="", args=None):
 
     state = get_provider_auth_state("nous")
     if not state or not state.get("access_token"):
-        print("Not logged into Nous Portal. Starting login...")
-        print()
         try:
             mock_args = argparse.Namespace(
                 portal_url=getattr(args, "portal_url", None),
