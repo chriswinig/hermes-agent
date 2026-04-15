@@ -372,8 +372,20 @@ def cronjob(
             return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
 
         if normalized in {"run", "run_now", "trigger"}:
-            updated = trigger_job(job_id)
-            return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
+            from cron.scheduler import execute_job_now
+
+            execution = execute_job_now(job)
+            return json.dumps(
+                {
+                    "success": execution["success"],
+                    "job": _format_job(execution["job"]),
+                    "output_file": execution.get("output_file"),
+                    "final_response": execution.get("final_response"),
+                    "error": execution.get("error"),
+                    "delivery_error": execution.get("delivery_error"),
+                },
+                indent=2,
+            )
 
         if normalized == "update":
             updates: Dict[str, Any] = {}
@@ -524,7 +536,7 @@ Important safety rule: cron-run sessions should not recursively schedule more cr
             },
             "script": {
                 "type": "string",
-                "description": f"Optional path to a Python script that runs before each cron job execution. Its stdout is injected into the prompt as context. Use for data collection and change detection. Relative paths resolve under {display_hermes_home()}/scripts/. On update, pass empty string to clear."
+                "description": f"Optional path to a script that runs before each cron job execution. Its stdout is injected into the prompt as context. Use for data collection and change detection. Python and shell scripts are supported. Relative paths resolve under {display_hermes_home()}/scripts/. On update, pass empty string to clear."
             },
             "context_from": {
                 "type": "array",

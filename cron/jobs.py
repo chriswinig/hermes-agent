@@ -451,20 +451,21 @@ def create_job(
         model: Optional per-job model override
         provider: Optional per-job provider override
         base_url: Optional per-job base URL override
-        script: Optional path to a Python script whose stdout is injected into the
-                prompt each run.  The script runs before the agent turn, and its output
-                is prepended as context.  Useful for data collection / change detection.
+        script: Optional path to a script whose stdout is injected into the
+                prompt each run. The script runs before the agent turn, and its output
+                is prepended as context. Useful for data collection / change detection.
+                Python and shell scripts are both supported.
         context_from: Optional job ID (or list of job IDs) whose most recent output
                       is injected into the prompt as context before each run.
                       Useful for chaining cron jobs: job A finds data, job B processes it.
         enabled_toolsets: Optional list of toolset names to restrict the agent to.
                           When set, only tools from these toolsets are loaded, reducing
                           token overhead. When omitted, all default tools are loaded.
-        workdir: Optional absolute path.  When set, the job runs as if launched
+        workdir: Optional absolute path. When set, the job runs as if launched
                 from that directory: AGENTS.md / CLAUDE.md / .cursorrules from
                 that directory are injected into the system prompt, and the
                 terminal/file/code_exec tools use it as their working directory
-                (via TERMINAL_CWD).  When unset, the old behaviour is preserved
+                (via TERMINAL_CWD). When unset, the old behaviour is preserved
                 (no context files injected, tools use the scheduler's cwd).
 
     Returns:

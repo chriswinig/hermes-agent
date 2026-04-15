@@ -134,6 +134,29 @@ class TestUnifiedCronjobTool:
         assert resumed["success"] is True
         assert resumed["job"]["state"] == "scheduled"
 
+    def test_run_executes_immediately(self, monkeypatch):
+        created = json.loads(cronjob(action="create", prompt="Check", schedule="every 1h", name="Immediate"))
+        job_id = created["job_id"]
+
+        def fake_execute(job, adapters=None, loop=None):
+            return {
+                "success": True,
+                "job": {**job, "last_run_at": "2026-04-13T07:00:00-04:00", "last_status": "ok"},
+                "output_file": "/tmp/out.md",
+                "final_response": "done",
+                "error": None,
+                "delivery_error": None,
+            }
+
+        monkeypatch.setattr("cron.scheduler.execute_job_now", fake_execute)
+
+        ran = json.loads(cronjob(action="run", job_id=job_id))
+        assert ran["success"] is True
+        assert ran["output_file"] == "/tmp/out.md"
+        assert ran["final_response"] == "done"
+        assert ran["job"]["last_run_at"] == "2026-04-13T07:00:00-04:00"
+        assert ran["job"]["last_status"] == "ok"
+
     def test_update_schedule_recomputes_display(self):
         created = json.loads(cronjob(action="create", prompt="Check", schedule="every 1h"))
         job_id = created["job_id"]

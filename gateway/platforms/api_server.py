@@ -549,6 +549,7 @@ try:
         resume_job as _cron_resume,
         trigger_job as _cron_trigger,
     )
+    from cron.scheduler import execute_job_now as _cron_run_now
     _CRON_AVAILABLE = True
 except ImportError:
     _cron_list = None
@@ -559,6 +560,7 @@ except ImportError:
     _cron_pause = None
     _cron_resume = None
     _cron_trigger = None
+    _cron_run_now = None
 
 
 class APIServerAdapter(BasePlatformAdapter):
@@ -568,6 +570,17 @@ class APIServerAdapter(BasePlatformAdapter):
     Runs an aiohttp web server that accepts OpenAI-format requests
     and routes them through hermes-agent's AIAgent.
     """
+
+    _CRON_AVAILABLE = _CRON_AVAILABLE
+    _cron_list = staticmethod(_cron_list) if _cron_list else None
+    _cron_get = staticmethod(_cron_get) if _cron_get else None
+    _cron_create = staticmethod(_cron_create) if _cron_create else None
+    _cron_update = staticmethod(_cron_update) if _cron_update else None
+    _cron_remove = staticmethod(_cron_remove) if _cron_remove else None
+    _cron_pause = staticmethod(_cron_pause) if _cron_pause else None
+    _cron_resume = staticmethod(_cron_resume) if _cron_resume else None
+    _cron_trigger = staticmethod(_cron_trigger) if _cron_trigger else None
+    _cron_run_now = staticmethod(_cron_run_now) if _cron_run_now else None
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config, Platform.API_SERVER)
@@ -2252,10 +2265,11 @@ class APIServerAdapter(BasePlatformAdapter):
         if id_err:
             return id_err
         try:
-            job = _cron_trigger(job_id)
+            job = self._cron_get(job_id)
             if not job:
                 return web.json_response({"error": "Job not found"}, status=404)
-            return web.json_response({"job": job})
+            result = await asyncio.to_thread(self._cron_run_now, job)
+            return web.json_response(result)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
