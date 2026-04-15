@@ -109,6 +109,36 @@ class TestShouldResetReason:
 # ---------------------------------------------------------------------------
 
 class TestSessionEntryReason:
+    def test_suspend_recently_active_uses_datetime_cutoff(self, tmp_path):
+        store = _make_store(tmp_path=tmp_path)
+        now = datetime.now()
+        store._entries["recent"] = SessionEntry(
+            session_key="recent",
+            session_id="s-recent",
+            created_at=now - timedelta(minutes=10),
+            updated_at=now - timedelta(seconds=30),
+        )
+        store._entries["old"] = SessionEntry(
+            session_key="old",
+            session_id="s-old",
+            created_at=now - timedelta(minutes=10),
+            updated_at=now - timedelta(minutes=10),
+        )
+        store._entries["already"] = SessionEntry(
+            session_key="already",
+            session_id="s-already",
+            created_at=now - timedelta(minutes=10),
+            updated_at=now - timedelta(seconds=10),
+            suspended=True,
+        )
+
+        suspended = store.suspend_recently_active(max_age_seconds=120)
+
+        assert suspended == 1
+        assert store._entries["recent"].suspended is True
+        assert store._entries["old"].suspended is False
+        assert store._entries["already"].suspended is True
+
     def test_auto_reset_reason_stored(self, tmp_path):
         store = _make_store(
             SessionResetPolicy(mode="idle", idle_minutes=1),
