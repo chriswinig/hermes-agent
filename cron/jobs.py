@@ -518,8 +518,8 @@ def create_job(
                 delivered verbatim. Without ``no_agent``, its stdout is
                 injected into the agent's prompt as context (data-collection /
                 change-detection pattern). Paths resolve under
-                ~/.hermes/scripts/; ``.sh`` / ``.bash`` files run via bash,
-                anything else via Python.
+                ~/.hermes/scripts/. Scripts may use shebangs; .py/.sh/.bash
+                have safe defaults.
         context_from: Optional job ID (or list of job IDs) whose most recent output
                       is injected into the prompt as context before each run.
                       Useful for chaining cron jobs: job A finds data, job B processes it.
@@ -527,11 +527,11 @@ def create_job(
                           When set, only tools from these toolsets are loaded, reducing
                           token overhead. When omitted, all default tools are loaded.
                           Ignored when ``no_agent=True``.
-        workdir: Optional absolute path.  When set, the job runs as if launched
+        workdir: Optional absolute path. When set, the job runs as if launched
                 from that directory: AGENTS.md / CLAUDE.md / .cursorrules from
                 that directory are injected into the system prompt, and the
                 terminal/file/code_exec tools use it as their working directory
-                (via TERMINAL_CWD).  When unset, the old behaviour is preserved
+                (via TERMINAL_CWD). When unset, the old behaviour is preserved
                 (no context files injected, tools use the scheduler's cwd).
                 With ``no_agent=True``, ``workdir`` is still applied as the
                 script's cwd so relative paths inside the script behave

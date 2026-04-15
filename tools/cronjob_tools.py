@@ -401,8 +401,20 @@ def cronjob(
             return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
 
         if normalized in {"run", "run_now", "trigger"}:
-            updated = trigger_job(job_id)
-            return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
+            from cron.scheduler import execute_job_now
+
+            execution = execute_job_now(job)
+            return json.dumps(
+                {
+                    "success": execution["success"],
+                    "job": _format_job(execution["job"]),
+                    "output_file": execution.get("output_file"),
+                    "final_response": execution.get("final_response"),
+                    "error": execution.get("error"),
+                    "delivery_error": execution.get("delivery_error"),
+                },
+                indent=2,
+            )
 
         if normalized == "update":
             updates: Dict[str, Any] = {}
@@ -567,7 +579,7 @@ Important safety rule: cron-run sessions should not recursively schedule more cr
             },
             "script": {
                 "type": "string",
-                "description": f"Optional path to a script that runs each tick. In the default mode its stdout is injected into the agent's prompt as context (data-collection / change-detection pattern). With no_agent=True, the script IS the job and its stdout is delivered verbatim (classic watchdog pattern). Relative paths resolve under {display_hermes_home()}/scripts/. ``.sh``/``.bash`` extensions run via bash, everything else via Python. On update, pass empty string to clear."
+                "description": f"Optional path to a script that runs each tick. In the default mode its stdout is injected into the agent's prompt as context (data-collection / change-detection pattern). With no_agent=True, the script IS the job and its stdout is delivered verbatim (classic watchdog pattern). Relative paths resolve under {display_hermes_home()}/scripts/. Scripts may use shebangs; .py/.sh/.bash have safe defaults. On update, pass empty string to clear."
             },
             "no_agent": {
                 "type": "boolean",

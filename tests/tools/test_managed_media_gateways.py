@@ -169,6 +169,7 @@ def test_managed_fal_submit_uses_gateway_origin_and_nous_token(monkeypatch):
     _install_fake_tools_package()
     _install_fake_fal_client(captured)
     monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.delenv("FAL_API_KEY", raising=False)
     monkeypatch.setenv("FAL_QUEUE_GATEWAY_URL", "http://127.0.0.1:3009")
     monkeypatch.setenv("TOOL_GATEWAY_USER_TOKEN", "nous-token")
 
@@ -197,6 +198,7 @@ def test_managed_fal_submit_reuses_cached_sync_client(monkeypatch):
     _install_fake_tools_package()
     _install_fake_fal_client(captured)
     monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.delenv("FAL_API_KEY", raising=False)
     monkeypatch.setenv("FAL_QUEUE_GATEWAY_URL", "http://127.0.0.1:3009")
     monkeypatch.setenv("TOOL_GATEWAY_USER_TOKEN", "nous-token")
 
@@ -211,6 +213,41 @@ def test_managed_fal_submit_reuses_cached_sync_client(monkeypatch):
 
     assert captured["sync_client_inits"] == 1
     assert captured["http_client"] is first_client
+
+
+def test_direct_fal_submit_accepts_fal_api_key_alias(monkeypatch):
+    captured = {}
+    _install_fake_tools_package()
+
+    def submit(model, arguments=None, headers=None):
+        captured["model"] = model
+        captured["arguments"] = arguments
+        captured["headers"] = headers
+        return object()
+
+    sys.modules["fal_client"] = types.SimpleNamespace(submit=submit)
+
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.delenv("FAL_QUEUE_GATEWAY_URL", raising=False)
+    monkeypatch.delenv("TOOL_GATEWAY_USER_TOKEN", raising=False)
+    monkeypatch.setenv("FAL_API_KEY", "fal-api-key-alias")
+
+    image_generation_tool = _load_tool_module(
+        "tools.image_generation_tool",
+        "image_generation_tool.py",
+    )
+    monkeypatch.setattr(image_generation_tool.uuid, "uuid4", lambda: "fal-submit-alias")
+
+    image_generation_tool._submit_fal_request(
+        "fal-ai/flux-2-pro",
+        {"prompt": "test prompt", "num_images": 1},
+    )
+
+    assert captured["model"] == "fal-ai/flux-2-pro"
+    assert captured["arguments"] == {"prompt": "test prompt", "num_images": 1}
+    assert captured["headers"] == {"x-idempotency-key": "fal-submit-alias"}
+    assert image_generation_tool.check_fal_api_key() is True
+    assert image_generation_tool.os.environ["FAL_KEY"] == "fal-api-key-alias"
 
 
 def test_openai_tts_uses_managed_audio_gateway_when_direct_key_absent(monkeypatch, tmp_path):

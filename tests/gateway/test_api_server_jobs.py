@@ -448,21 +448,33 @@ class TestResumeJob:
 class TestRunJob:
     @pytest.mark.asyncio
     async def test_run_job(self, adapter):
-        """POST /api/jobs/{id}/run returns triggered job."""
+        """POST /api/jobs/{id}/run executes the job immediately."""
         app = _create_app(adapter)
-        triggered_job = {**SAMPLE_JOB, "last_run": "2025-01-01T00:00:00Z"}
-        mock_trigger = MagicMock(return_value=triggered_job)
+        fetched_job = {**SAMPLE_JOB}
+        run_result = {
+            "success": True,
+            "job": {**SAMPLE_JOB, "last_run_at": "2025-01-01T00:00:00Z", "last_status": "ok"},
+            "output_file": "/tmp/out.md",
+            "final_response": "OK",
+            "error": None,
+            "delivery_error": None,
+        }
+        mock_get = MagicMock(return_value=fetched_job)
+        mock_run = MagicMock(return_value=run_result)
         async with TestClient(TestServer(app)) as cli:
-            with patch(
-                f"{_MOD}._CRON_AVAILABLE", True
-            ), patch(
-                f"{_MOD}._cron_trigger", mock_trigger
+            with patch.object(
+                APIServerAdapter, "_CRON_AVAILABLE", True
+            ), patch.object(
+                APIServerAdapter, "_cron_get", mock_get
+            ), patch.object(
+                APIServerAdapter, "_cron_run_now", mock_run
             ):
                 resp = await cli.post(f"/api/jobs/{VALID_JOB_ID}/run")
                 assert resp.status == 200
                 data = await resp.json()
-                assert data["job"] == triggered_job
-                mock_trigger.assert_called_once_with(VALID_JOB_ID)
+                assert data == run_result
+                mock_get.assert_called_once_with(VALID_JOB_ID)
+                mock_run.assert_called_once_with(fetched_job)
 
 
 # ---------------------------------------------------------------------------

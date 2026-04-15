@@ -14,7 +14,7 @@ import contextvars
 import json
 import logging
 import os
-import shutil
+import shlex
 import subprocess
 import sys
 
@@ -121,7 +121,7 @@ _LEGACY_HOME_TARGET_ENV_VARS = {
     "QQBOT_HOME_CHANNEL": "QQ_HOME_CHANNEL",
 }
 
-from cron.jobs import get_due_jobs, mark_job_run, save_job_output, advance_next_run
+from cron.jobs import get_due_jobs, get_job, mark_job_run, save_job_output, advance_next_run
 
 # Sentinel: when a cron agent has nothing new to report, it can start its
 # response with this marker to suppress delivery.  Output is still saved
@@ -693,6 +693,38 @@ def _get_script_timeout() -> int:
     return _DEFAULT_SCRIPT_TIMEOUT
 
 
+def _resolve_script_command(path: Path) -> list[str]:
+    """Return the command used to execute a validated cron script.
+
+    Prefer the script's shebang when present so shell scripts and other
+    interpreters work under cron. Fall back to sane defaults for common
+    extensions when no shebang exists.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            first_line = handle.readline().strip()
+    except UnicodeDecodeError:
+        first_line = ""
+
+    if first_line.startswith("#!"):
+        interpreter = first_line[2:].strip()
+        if interpreter:
+            return [*shlex.split(interpreter), str(path)]
+
+    suffix = path.suffix.lower()
+    if suffix == ".py":
+        return [sys.executable, str(path)]
+    if suffix in {".sh", ".bash"}:
+        return ["/bin/bash", str(path)]
+    if os.access(path, os.X_OK):
+        return [str(path)]
+
+    raise ValueError(
+        "Unsupported script type without shebang. "
+        "Add a shebang (for example #!/bin/bash or #!/usr/bin/env python3)."
+    )
+
+
 def _run_job_script(script_path: str) -> tuple[bool, str]:
     """Execute a cron job's data-collection script and capture its output.
 
@@ -712,9 +744,10 @@ def _run_job_script(script_path: str) -> tuple[bool, str]:
     (the `memory-watchdog.sh` pattern) without wrapping them in Python.
 
     Args:
-        script_path: Path to the script.  Relative paths are resolved
-            against HERMES_HOME/scripts/.  Absolute and ~-prefixed paths
-            are also validated to ensure they stay within the scripts dir.
+        script_path: Path to a script inside HERMES_HOME/scripts/. Relative
+            paths are resolved against that directory. Absolute and
+            ~-prefixed paths are also validated to ensure they stay within
+            the scripts dir.
 
     Returns:
         (success, output) — on failure *output* contains the error message so the
@@ -749,33 +782,12 @@ def _run_job_script(script_path: str) -> tuple[bool, str]:
 
     script_timeout = _get_script_timeout()
 
-    # Pick an interpreter by extension.  Bash for .sh/.bash, Python for
-    # everything else.  We deliberately do NOT honour the file's own
-    # shebang: the scripts dir is trusted, but keeping the interpreter
-    # choice explicit here keeps the allowed surface small and auditable.
-    suffix = path.suffix.lower()
-    if suffix in (".sh", ".bash"):
-        # Resolve bash dynamically so Windows (Git Bash) and Linux/macOS
-        # all work.  On native Windows without Git for Windows installed
-        # shutil.which returns None — fall back to a clear error rather
-        # than a FileNotFoundError with a confusing "[WinError 2]"
-        # traceback.
-        _bash = shutil.which("bash") or (
-            "/bin/bash" if os.path.isfile("/bin/bash") else None
-        )
-        if _bash is None:
-            return False, (
-                f"Cannot run .sh/.bash script {path.name!r}: bash not found on PATH. "
-                "On Windows, install Git for Windows (which ships Git Bash) "
-                "or rewrite the script as Python (.py)."
-            )
-        argv = [_bash, str(path)]
-    else:
-        argv = [sys.executable, str(path)]
-
+    # Resolve the command after path validation. Upstream supports shebangs
+    # while falling back to safe defaults for .py/.sh/.bash scripts.
     try:
+        command = _resolve_script_command(path)
         result = subprocess.run(
-            argv,
+            command,
             capture_output=True,
             text=True,
             timeout=script_timeout,
@@ -1651,6 +1663,39 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             cleanup_stale_async_clients()
         except Exception as e:
             logger.debug("Job '%s': failed to reap stale auxiliary clients: %s", job_id, e)
+
+
+def execute_job_now(job: dict, adapters=None, loop=None) -> dict:
+    """Execute one job immediately and persist the normal scheduler side effects."""
+    advance_next_run(job["id"])
+
+    success, output, final_response, error = run_job(job)
+    output_file = save_job_output(job["id"], output)
+
+    deliver_content = final_response if success else f"⚠️ Cron job '{job.get('name', job['id'])}' failed:\n{error}"
+    should_deliver = bool(deliver_content)
+    if should_deliver and success and SILENT_MARKER in deliver_content.strip().upper():
+        logger.info("Job '%s': agent returned %s — skipping delivery", job["id"], SILENT_MARKER)
+        should_deliver = False
+
+    delivery_error = None
+    if should_deliver:
+        try:
+            delivery_error = _deliver_result(job, deliver_content, adapters=adapters, loop=loop)
+        except Exception as de:
+            delivery_error = str(de)
+            logger.error("Delivery failed for job %s: %s", job["id"], de)
+
+    mark_job_run(job["id"], success, error, delivery_error=delivery_error)
+    latest_job = get_job(job["id"])
+    return {
+        "success": success,
+        "output_file": str(output_file),
+        "final_response": final_response,
+        "error": error,
+        "delivery_error": delivery_error,
+        "job": latest_job or job,
+    }
 
 
 def tick(verbose: bool = True, adapters=None, loop=None) -> int:

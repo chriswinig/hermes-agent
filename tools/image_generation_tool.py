@@ -319,10 +319,15 @@ _managed_fal_client_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 # Managed FAL gateway (Nous Subscription)
 # ---------------------------------------------------------------------------
+def _get_direct_fal_api_key() -> str:
+    """Return a direct FAL API key from either the primary or alias env var."""
+    return str(os.getenv("FAL_KEY") or os.getenv("FAL_API_KEY") or "").strip()
+
+
 def _resolve_managed_fal_gateway():
     """Return managed fal-queue gateway config when the user prefers the gateway
     or direct FAL credentials are absent."""
-    if fal_key_is_configured() and not prefers_gateway("image_gen"):
+    if _get_direct_fal_api_key() and not prefers_gateway("image_gen"):
         return None
     return resolve_managed_tool_gateway("fal-queue")
 
@@ -438,6 +443,9 @@ def _submit_fal_request(model: str, arguments: Dict[str, Any]):
     request_headers = {"x-idempotency-key": str(uuid.uuid4())}
     managed_gateway = _resolve_managed_fal_gateway()
     if managed_gateway is None:
+        direct_key = _get_direct_fal_api_key()
+        if direct_key and not os.getenv("FAL_KEY"):
+            os.environ["FAL_KEY"] = direct_key
         return fal_client.submit(model, arguments=arguments, headers=request_headers)
 
     managed_client = _get_managed_fal_client(managed_gateway)
@@ -658,9 +666,10 @@ def image_generate_tool(
     try:
         if not prompt or not isinstance(prompt, str) or len(prompt.strip()) == 0:
             raise ValueError("Prompt is required and must be a non-empty string")
-
-        if not (fal_key_is_configured() or _resolve_managed_fal_gateway()):
-            message = "FAL_KEY environment variable not set"
+        
+        # Check API key availability
+        if not (_get_direct_fal_api_key() or _resolve_managed_fal_gateway()):
+            message = "FAL_KEY/FAL_API_KEY environment variable not set"
             if managed_nous_tools_enabled():
                 message += " and managed FAL gateway is unavailable"
             raise ValueError(message)
@@ -770,7 +779,7 @@ def image_generate_tool(
 
 def check_fal_api_key() -> bool:
     """True if the FAL.ai API key (direct or managed gateway) is available."""
-    return bool(fal_key_is_configured() or _resolve_managed_fal_gateway())
+    return bool(_get_direct_fal_api_key() or _resolve_managed_fal_gateway())
 
 
 def check_image_generation_requirements() -> bool:
