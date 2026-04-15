@@ -9,7 +9,7 @@ the public API that run_agent.py, cli.py, batch_runner.py, and the RL
 environments consume.
 
 Public API (signatures preserved from the original 2,400-line version):
-    get_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode) -> list
+    get_tool_definitions(enabled_toolsets, disabled_toolsets, allowed_tools, disabled_tools, quiet_mode) -> list
     handle_function_call(function_name, function_args, task_id, user_task) -> str
     TOOL_TO_TOOLSET_MAP: dict          (for batch_runner.py)
     TOOLSET_REQUIREMENTS: dict         (for cli.py, doctor.py)
@@ -234,6 +234,8 @@ _LEGACY_TOOLSET_MAP = {
 def get_tool_definitions(
     enabled_toolsets: List[str] = None,
     disabled_toolsets: List[str] = None,
+    allowed_tools: List[str] = None,
+    disabled_tools: List[str] = None,
     quiet_mode: bool = False,
 ) -> List[Dict[str, Any]]:
     """
@@ -244,6 +246,8 @@ def get_tool_definitions(
     Args:
         enabled_toolsets: Only include tools from these toolsets.
         disabled_toolsets: Exclude tools from these toolsets (if enabled_toolsets is None).
+        allowed_tools: If set, only include these specific tools after toolset resolution.
+        disabled_tools: Exclude these specific tools after all other filtering.
         quiet_mode: Suppress status prints.
 
     Returns:
@@ -300,6 +304,20 @@ def get_tool_definitions(
 
     # Ask the registry for schemas (only returns tools whose check_fn passes)
     filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)
+
+    if allowed_tools:
+        allowed = {name for name in allowed_tools if name}
+        filtered_tools = [
+            td for td in filtered_tools
+            if td.get("function", {}).get("name") in allowed
+        ]
+
+    if disabled_tools:
+        blocked = {name for name in disabled_tools if name}
+        filtered_tools = [
+            td for td in filtered_tools
+            if td.get("function", {}).get("name") not in blocked
+        ]
 
     # The set of tool names that actually passed check_fn filtering.
     # Use this (not tools_to_include) for any downstream schema that references

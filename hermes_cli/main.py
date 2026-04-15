@@ -4806,7 +4806,7 @@ For more help on a command:
     cron_create.add_argument("--deliver", help="Delivery target: origin, local, telegram, discord, signal, or platform:chat_id")
     cron_create.add_argument("--repeat", type=int, help="Optional repeat count")
     cron_create.add_argument("--skill", dest="skills", action="append", help="Attach a skill. Repeat to add multiple skills.")
-    cron_create.add_argument("--script", help="Path to a Python script whose stdout is injected into the prompt each run")
+    cron_create.add_argument("--script", help="Path to a script whose stdout is injected into the prompt each run")
 
     # cron edit
     cron_edit = cron_subparsers.add_parser("edit", help="Edit an existing scheduled job")
@@ -4820,7 +4820,7 @@ For more help on a command:
     cron_edit.add_argument("--add-skill", dest="add_skills", action="append", help="Append a skill without replacing the existing list. Repeatable.")
     cron_edit.add_argument("--remove-skill", dest="remove_skills", action="append", help="Remove a specific attached skill. Repeatable.")
     cron_edit.add_argument("--clear-skills", action="store_true", help="Remove all attached skills from the job")
-    cron_edit.add_argument("--script", help="Path to a Python script whose stdout is injected into the prompt each run. Pass empty string to clear.")
+    cron_edit.add_argument("--script", help="Path to a script whose stdout is injected into the prompt each run. Pass empty string to clear.")
 
     # lifecycle actions
     cron_pause = cron_subparsers.add_parser("pause", help="Pause a scheduled job")
@@ -4829,7 +4829,7 @@ For more help on a command:
     cron_resume = cron_subparsers.add_parser("resume", help="Resume a paused job")
     cron_resume.add_argument("job_id", help="Job ID to resume")
 
-    cron_run = cron_subparsers.add_parser("run", help="Run a job on the next scheduler tick")
+    cron_run = cron_subparsers.add_parser("run", help="Run a job immediately")
     cron_run.add_argument("job_id", help="Job ID to trigger")
 
     cron_remove = cron_subparsers.add_parser("remove", aliases=["rm", "delete"], help="Remove a scheduled job")
