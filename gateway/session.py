@@ -1089,8 +1089,6 @@ class SessionStore:
         is handled by the existing ``.restart_failure_counts`` stuck-loop
         counter, which runs after this method on startup.
         """
-        from datetime import timedelta
-
         cutoff = _now() - timedelta(seconds=max_age_seconds)
         count = 0
         with self._lock:
