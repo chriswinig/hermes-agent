@@ -1103,8 +1103,6 @@ class SessionStore:
 
         Returns the number of sessions marked resumable.
         """
-        from datetime import timedelta
-
         cutoff = _now() - timedelta(seconds=max_age_seconds)
         count = 0
         with self._lock:
