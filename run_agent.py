@@ -80,7 +80,7 @@ from agent.retry_utils import jittered_backoff
 from agent.error_classifier import classify_api_error, FailoverReason
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
-    MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
+    MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, BRAIN_FIRST_LOOKUP_GUIDANCE, SKILLS_GUIDANCE,
     build_nous_subscription_prompt,
 )
 from agent.model_metadata import (
@@ -564,6 +564,8 @@ class AIAgent:
         tool_delay: float = 1.0,
         enabled_toolsets: List[str] = None,
         disabled_toolsets: List[str] = None,
+        allowed_tools: List[str] = None,
+        disabled_tools: List[str] = None,
         save_trajectories: bool = False,
         verbose_logging: bool = False,
         quiet_mode: bool = False,
@@ -621,6 +623,8 @@ class AIAgent:
             tool_delay (float): Delay between tool calls in seconds (default: 1.0)
             enabled_toolsets (List[str]): Only enable tools from these toolsets (optional)
             disabled_toolsets (List[str]): Disable tools from these toolsets (optional)
+            allowed_tools (List[str]): Only allow these specific tools after toolset resolution (optional)
+            disabled_tools (List[str]): Disable these specific tools after toolset resolution (optional)
             save_trajectories (bool): Whether to save conversation trajectories to JSONL files (default: False)
             verbose_logging (bool): Enable verbose logging for debugging (default: False)
             quiet_mode (bool): Suppress progress output for clean CLI experience (default: False)
@@ -795,7 +799,9 @@ class AIAgent:
         # Store toolset filtering options
         self.enabled_toolsets = enabled_toolsets
         self.disabled_toolsets = disabled_toolsets
-        
+        self.allowed_tools = allowed_tools
+        self.disabled_tools = disabled_tools
+
         # Model response configuration
         self.max_tokens = max_tokens  # None = use model default
         self.reasoning_config = reasoning_config  # None = use default (medium for OpenRouter)
@@ -1089,6 +1095,8 @@ class AIAgent:
         self.tools = get_tool_definitions(
             enabled_toolsets=enabled_toolsets,
             disabled_toolsets=disabled_toolsets,
+            allowed_tools=allowed_tools,
+            disabled_tools=disabled_tools,
             quiet_mode=self.quiet_mode,
         )
         
@@ -1341,6 +1349,7 @@ class AIAgent:
         if not isinstance(_agent_section, dict):
             _agent_section = {}
         self._tool_use_enforcement = _agent_section.get("tool_use_enforcement", "auto")
+        self._brain_first_lookup_enforcement = _agent_section.get("brain_first_lookup_enforcement", "auto")
 
         # Initialize context compressor for automatic context management
         # Compresses conversation when approaching model's context limit
@@ -3407,6 +3416,30 @@ class AIAgent:
                 # prerequisite checks, verification, anti-hallucination).
                 if "gpt" in _model_lower or "codex" in _model_lower:
                     prompt_parts.append(OPENAI_MODEL_EXECUTION_GUIDANCE)
+
+        # Brain-first lookup enforcement: tells the model to check durable
+        # knowledge/ notes via gbrain before answering questions likely already
+        # captured in the brain. Controlled by config.yaml
+        # agent.brain_first_lookup_enforcement:
+        #   "auto" (default) — matches TOOL_USE_ENFORCEMENT_MODELS
+        #   true  — always inject (all models)
+        #   false — never inject
+        #   list  — custom model-name substrings to match
+        if self.valid_tool_names and "terminal" in self.valid_tool_names:
+            _enforce = self._brain_first_lookup_enforcement
+            _inject = False
+            if _enforce is True or (isinstance(_enforce, str) and _enforce.lower() in ("true", "always", "yes", "on")):
+                _inject = True
+            elif _enforce is False or (isinstance(_enforce, str) and _enforce.lower() in ("false", "never", "no", "off")):
+                _inject = False
+            elif isinstance(_enforce, list):
+                model_lower = (self.model or "").lower()
+                _inject = any(p.lower() in model_lower for p in _enforce if isinstance(p, str))
+            else:
+                model_lower = (self.model or "").lower()
+                _inject = any(p in model_lower for p in TOOL_USE_ENFORCEMENT_MODELS)
+            if _inject:
+                prompt_parts.append(BRAIN_FIRST_LOOKUP_GUIDANCE)
 
         # so it can refer the user to them rather than reinventing answers.
 

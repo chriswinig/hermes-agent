@@ -111,6 +111,17 @@ class TestRunJobScript:
         assert success is True
         assert output == "relative works"
 
+    def test_shell_script_with_shebang(self, cron_env):
+        from cron.scheduler import _run_job_script
+
+        script = cron_env / "scripts" / "keepalive.sh"
+        script.write_text("#!/usr/bin/env bash\necho shell works\n")
+        script.chmod(script.stat().st_mode | stat.S_IXUSR)
+
+        success, output = _run_job_script("keepalive.sh")
+        assert success is True
+        assert output == "shell works"
+
     def test_script_not_found(self, cron_env):
         from cron.scheduler import _run_job_script
 

@@ -255,6 +255,9 @@ class GatewayConfig:
     # Unauthorized DM policy
     unauthorized_dm_behavior: str = "pair"  # "pair" or "ignore"
 
+    # Per-chat sender-based restrictions
+    channel_restrictions: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
     # Streaming configuration
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
 
@@ -356,6 +359,7 @@ class GatewayConfig:
             "group_sessions_per_user": self.group_sessions_per_user,
             "thread_sessions_per_user": self.thread_sessions_per_user,
             "unauthorized_dm_behavior": self.unauthorized_dm_behavior,
+            "channel_restrictions": self.channel_restrictions,
             "streaming": self.streaming.to_dict(),
         }
     
@@ -403,6 +407,9 @@ class GatewayConfig:
             data.get("unauthorized_dm_behavior"),
             "pair",
         )
+        channel_restrictions = data.get("channel_restrictions", {})
+        if not isinstance(channel_restrictions, dict):
+            channel_restrictions = {}
 
         return cls(
             platforms=platforms,
@@ -417,6 +424,7 @@ class GatewayConfig:
             group_sessions_per_user=_coerce_bool(group_sessions_per_user, True),
             thread_sessions_per_user=_coerce_bool(thread_sessions_per_user, False),
             unauthorized_dm_behavior=unauthorized_dm_behavior,
+            channel_restrictions=channel_restrictions,
             streaming=StreamingConfig.from_dict(data.get("streaming", {})),
         )
 
@@ -509,6 +517,10 @@ def load_gateway_config() -> GatewayConfig:
                     yaml_cfg.get("unauthorized_dm_behavior"),
                     "pair",
                 )
+
+            channel_restrictions = yaml_cfg.get("channel_restrictions")
+            if isinstance(channel_restrictions, dict):
+                gw_data["channel_restrictions"] = channel_restrictions
 
             # Merge platforms section from config.yaml into gw_data so that
             # nested keys like platforms.webhook.extra.routes are loaded.

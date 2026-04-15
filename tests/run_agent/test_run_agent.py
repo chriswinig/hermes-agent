@@ -84,6 +84,42 @@ def agent_with_memory_tool():
         return a
 
 
+def test_agent_passes_disabled_tools_to_tool_loader():
+    with (
+        patch("run_agent.get_tool_definitions", return_value=[] ) as mock_get_tools,
+        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch.object(AIAgent, "_create_openai_client", return_value=MagicMock(), create=True),
+        patch("run_agent.OpenAI"),
+    ):
+        AIAgent(
+            api_key="test-k...7890",
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+            disabled_tools=["terminal", "read_file"],
+        )
+
+    assert mock_get_tools.call_args.kwargs["disabled_tools"] == ["terminal", "read_file"]
+
+
+def test_agent_passes_allowed_tools_to_tool_loader():
+    with (
+        patch("run_agent.get_tool_definitions", return_value=[] ) as mock_get_tools,
+        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch.object(AIAgent, "_create_openai_client", return_value=MagicMock(), create=True),
+        patch("run_agent.OpenAI"),
+    ):
+        AIAgent(
+            api_key="test-k...7890",
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+            allowed_tools=["image_generate"],
+        )
+
+    assert mock_get_tools.call_args.kwargs["allowed_tools"] == ["image_generate"]
+
+
 def test_aiagent_reuses_existing_errors_log_handler():
     """Repeated AIAgent init should not accumulate duplicate errors.log handlers."""
     root_logger = logging.getLogger()
@@ -709,18 +745,29 @@ class TestBuildSystemPrompt:
 class TestToolUseEnforcementConfig:
     """Tests for the agent.tool_use_enforcement config option."""
 
-    def _make_agent(self, model="openai/gpt-4.1", tool_use_enforcement="auto"):
-        """Create an agent with tools and a specific enforcement config."""
+    def _make_agent(
+        self,
+        model="openai/gpt-4.1",
+        tool_use_enforcement="auto",
+        brain_first_lookup_enforcement="auto",
+        tools=("terminal", "web_search"),
+    ):
+        """Create an agent with tools and specific enforcement config."""
         with (
             patch(
                 "run_agent.get_tool_definitions",
-                return_value=_make_tool_defs("terminal", "web_search"),
+                return_value=_make_tool_defs(*tools),
             ),
             patch("run_agent.check_toolset_requirements", return_value={}),
             patch("run_agent.OpenAI"),
             patch(
                 "hermes_cli.config.load_config",
-                return_value={"agent": {"tool_use_enforcement": tool_use_enforcement}},
+                return_value={
+                    "agent": {
+                        "tool_use_enforcement": tool_use_enforcement,
+                        "brain_first_lookup_enforcement": brain_first_lookup_enforcement,
+                    }
+                },
             ),
         ):
             a = AIAgent(
@@ -830,6 +877,73 @@ class TestToolUseEnforcementConfig:
             a.client = MagicMock()
             prompt = a._build_system_prompt()
             assert TOOL_USE_ENFORCEMENT_GUIDANCE not in prompt
+
+
+class TestBrainFirstLookupEnforcementConfig:
+    """Tests for the agent.brain_first_lookup_enforcement config option."""
+
+    def _make_agent(
+        self,
+        model="openai/gpt-4.1",
+        brain_first_lookup_enforcement="auto",
+        tools=("terminal", "web_search"),
+    ):
+        with (
+            patch(
+                "run_agent.get_tool_definitions",
+                return_value=_make_tool_defs(*tools),
+            ),
+            patch("run_agent.check_toolset_requirements", return_value={}),
+            patch("run_agent.OpenAI"),
+            patch(
+                "hermes_cli.config.load_config",
+                return_value={
+                    "agent": {
+                        "brain_first_lookup_enforcement": brain_first_lookup_enforcement,
+                    }
+                },
+            ),
+        ):
+            a = AIAgent(
+                model=model,
+                api_key="test-key-1234567890",
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=True,
+            )
+            a.client = MagicMock()
+            return a
+
+    def test_auto_injects_for_gpt(self):
+        from agent.prompt_builder import BRAIN_FIRST_LOOKUP_GUIDANCE
+        agent = self._make_agent(model="openai/gpt-4.1", brain_first_lookup_enforcement="auto")
+        prompt = agent._build_system_prompt()
+        assert BRAIN_FIRST_LOOKUP_GUIDANCE in prompt
+
+    def test_false_disables_for_gpt(self):
+        from agent.prompt_builder import BRAIN_FIRST_LOOKUP_GUIDANCE
+        agent = self._make_agent(model="openai/gpt-4.1", brain_first_lookup_enforcement=False)
+        prompt = agent._build_system_prompt()
+        assert BRAIN_FIRST_LOOKUP_GUIDANCE not in prompt
+
+    def test_custom_list_matches(self):
+        from agent.prompt_builder import BRAIN_FIRST_LOOKUP_GUIDANCE
+        agent = self._make_agent(
+            model="deepseek/deepseek-r1",
+            brain_first_lookup_enforcement=["deepseek", "gemini"],
+        )
+        prompt = agent._build_system_prompt()
+        assert BRAIN_FIRST_LOOKUP_GUIDANCE in prompt
+
+    def test_no_terminal_never_injects(self):
+        from agent.prompt_builder import BRAIN_FIRST_LOOKUP_GUIDANCE
+        agent = self._make_agent(
+            model="openai/gpt-4.1",
+            brain_first_lookup_enforcement=True,
+            tools=("web_search",),
+        )
+        prompt = agent._build_system_prompt()
+        assert BRAIN_FIRST_LOOKUP_GUIDANCE not in prompt
 
 
 class TestInvalidateSystemPrompt:

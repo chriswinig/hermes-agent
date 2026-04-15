@@ -161,6 +161,15 @@ SESSION_SEARCH_GUIDANCE = (
     "asking them to repeat themselves."
 )
 
+BRAIN_FIRST_LOOKUP_GUIDANCE = (
+    "Before answering questions about durable knowledge already likely captured in notes — "
+    "people, projects, strategy, prior research, operating rules, bugs, gameplans, or decisions — "
+    "check the brain first using the terminal tool. Use `gbrain query \"question\"` for real questions "
+    "and `gbrain search \"keywords\"` for exact terms, filenames, or phrases. "
+    "Brain means `knowledge/` only; use memory or session_search for conversational continuity, "
+    "and web/tools only after the brain does not already contain the answer."
+)
+
 SKILLS_GUIDANCE = (
     "After completing a complex task (5+ tool calls), fixing a tricky error, "
     "or discovering a non-trivial workflow, save the approach as a "

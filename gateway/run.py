@@ -354,7 +354,67 @@ def _resolve_runtime_agent_kwargs() -> dict:
         "command": runtime.get("command"),
         "args": list(runtime.get("args") or []),
         "credential_pool": runtime.get("credential_pool"),
+        "source": runtime.get("source"),
     }
+
+
+def _resolve_entity_detection_runtime_kwargs() -> dict:
+    """Resolve a separate runtime for inbound entity detection when configured."""
+    provider_override = str(os.getenv("HERMES_ENTITY_DETECTION_PROVIDER", "") or "").strip().lower()
+    base_url_override = str(os.getenv("HERMES_ENTITY_DETECTION_BASE_URL", "") or "").strip()
+    api_key_override = str(os.getenv("HERMES_ENTITY_DETECTION_API_KEY", "") or "").strip()
+
+    if not any((provider_override, base_url_override, api_key_override)):
+        return _resolve_runtime_agent_kwargs()
+
+    if api_key_override and not (provider_override or base_url_override):
+        raise RuntimeError(
+            "HERMES_ENTITY_DETECTION_API_KEY requires HERMES_ENTITY_DETECTION_PROVIDER "
+            "or HERMES_ENTITY_DETECTION_BASE_URL"
+        )
+
+    from hermes_cli.runtime_provider import (
+        resolve_runtime_provider,
+        format_runtime_provider_error,
+    )
+
+    requested = provider_override or ("custom" if base_url_override else os.getenv("HERMES_INFERENCE_PROVIDER"))
+    try:
+        runtime = resolve_runtime_provider(
+            requested=requested,
+            explicit_api_key=api_key_override or None,
+            explicit_base_url=base_url_override or None,
+        )
+    except Exception as exc:
+        raise RuntimeError(format_runtime_provider_error(exc)) from exc
+
+    return {
+        "api_key": runtime.get("api_key"),
+        "base_url": runtime.get("base_url"),
+        "provider": runtime.get("provider"),
+        "api_mode": runtime.get("api_mode"),
+        "command": runtime.get("command"),
+        "args": list(runtime.get("args") or []),
+        "credential_pool": runtime.get("credential_pool"),
+        "source": runtime.get("source"),
+    }
+
+
+def _entity_detection_runtime_error(model: str, runtime_kwargs: dict) -> str | None:
+    """Return a human-readable incompatibility error for the entity worker runtime."""
+    normalized_model = str(model or "").strip().lower()
+    provider = str(runtime_kwargs.get("provider") or "").strip().lower()
+    base_url = str(runtime_kwargs.get("base_url") or "").strip().lower()
+    if normalized_model == "gpt-4.1-mini" and (
+        provider == "openai-codex" or "chatgpt.com/backend-api/codex" in base_url
+    ):
+        return (
+            "gpt-4.1-mini is not supported on the current openai-codex runtime. "
+            "Set HERMES_ENTITY_DETECTION_PROVIDER + HERMES_ENTITY_DETECTION_API_KEY, "
+            "or HERMES_ENTITY_DETECTION_BASE_URL + HERMES_ENTITY_DETECTION_API_KEY, "
+            "to route entity detection through a separate provider."
+        )
+    return None
 
 
 def _build_media_placeholder(event) -> str:
@@ -469,6 +529,91 @@ def _resolve_gateway_model(config: dict | None = None) -> str:
     elif isinstance(model_cfg, dict):
         return model_cfg.get("default") or model_cfg.get("model") or ""
     return ""
+
+
+def _resolve_channel_restrictions(config: dict | None, source: SessionSource) -> dict:
+    """Resolve sender-scoped restrictions for a specific chat.
+
+    Returns a dict with:
+      - allowed_tools: list[str]
+      - blocked_tools: list[str]
+      - brain_scope: str
+      - channel_prompt: str
+      - restricted: bool
+    """
+    cfg = config or {}
+    restrictions = cfg.get("channel_restrictions", {})
+    if not isinstance(restrictions, dict):
+        return {"allowed_tools": [], "blocked_tools": [], "brain_scope": "", "channel_prompt": "", "restricted": False}
+
+    chat_cfg = restrictions.get(str(source.chat_id))
+    if not isinstance(chat_cfg, dict):
+        return {"allowed_tools": [], "blocked_tools": [], "brain_scope": "", "channel_prompt": "", "restricted": False}
+
+    channel_prompt = str(chat_cfg.get("channel_prompt") or "").strip()
+    owner_bypass = str(chat_cfg.get("owner_bypass") or "").strip()
+    sender_id = str(source.user_id or "").strip()
+    if owner_bypass and sender_id and sender_id == owner_bypass:
+        return {"allowed_tools": [], "blocked_tools": [], "brain_scope": "", "channel_prompt": channel_prompt, "restricted": bool(channel_prompt)}
+
+    allowed_tools = chat_cfg.get("allowed_tools") or []
+    if isinstance(allowed_tools, str):
+        allowed_tools = [allowed_tools]
+    elif not isinstance(allowed_tools, list):
+        allowed_tools = []
+    allowed_tools = sorted({str(tool).strip() for tool in allowed_tools if str(tool).strip()})
+
+    blocked_tools = chat_cfg.get("blocked_tools") or []
+    if isinstance(blocked_tools, str):
+        blocked_tools = [blocked_tools]
+    elif not isinstance(blocked_tools, list):
+        blocked_tools = []
+    blocked_tools = sorted({str(tool).strip() for tool in blocked_tools if str(tool).strip()})
+
+    brain_scope = str(chat_cfg.get("brain_scope") or "").strip()
+    return {
+        "allowed_tools": allowed_tools,
+        "blocked_tools": blocked_tools,
+        "brain_scope": brain_scope,
+        "channel_prompt": channel_prompt,
+        "restricted": bool(allowed_tools or blocked_tools or brain_scope or channel_prompt),
+    }
+
+
+def _build_channel_restrictions_prompt(restrictions: dict) -> str:
+    """Build ephemeral system guidance for sender-scoped chat restrictions."""
+    if not restrictions or not restrictions.get("restricted"):
+        return ""
+
+    lines = [
+        "## Channel Restrictions",
+        "",
+        "This message is in a restricted shared chat context.",
+    ]
+    channel_prompt = restrictions.get("channel_prompt") or ""
+    if channel_prompt:
+        lines.append(channel_prompt)
+    brain_scope = restrictions.get("brain_scope") or ""
+    if brain_scope:
+        lines.append(
+            f"Any note/brain knowledge you use must stay strictly within the `{brain_scope}` slug prefix. "
+            "Do not answer from or reference notes outside that scope."
+        )
+    allowed_tools = restrictions.get("allowed_tools") or []
+    if allowed_tools:
+        lines.append(
+            "Only the following tools may be used in this context: "
+            + ", ".join(f"`{tool}`" for tool in allowed_tools)
+            + "."
+        )
+    blocked_tools = restrictions.get("blocked_tools") or []
+    if blocked_tools:
+        lines.append(
+            "The following tools are unavailable in this context: "
+            + ", ".join(f"`{tool}`" for tool in blocked_tools)
+            + "."
+        )
+    return "\n".join(lines)
 
 
 def _resolve_hermes_bin() -> Optional[list[str]]:
@@ -675,6 +820,7 @@ class GatewayRunner:
 
         # Track background tasks to prevent garbage collection mid-execution
         self._background_tasks: set = set()
+        self._entity_detection_lock = _threading.Lock()
 
 
 
@@ -717,6 +863,213 @@ class GatewayRunner:
             )
         except OSError as e:
             logger.warning("Failed to save voice modes: %s", e)
+
+    _ENTITY_DETECTION_MODEL = "gpt-4.1-mini"
+    _ENTITY_DETECTION_TIMEOUT_SECONDS = 120
+
+    def _entity_detection_dir(self) -> Path:
+        sessions_dir = getattr(getattr(self, "config", None), "sessions_dir", _hermes_home / "sessions")
+        return Path(sessions_dir) / "entity_detections"
+
+    def _entity_detection_path(self, session_id: str) -> Path:
+        return self._entity_detection_dir() / f"{session_id}.jsonl"
+
+    @staticmethod
+    def _extract_entity_detection_payload(text: str) -> dict:
+        raw = str(text or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            pass
+
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if not match:
+            return {}
+        try:
+            parsed = json.loads(match.group(0))
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    def _parse_entity_detection_response(self, text: str) -> list[dict[str, Any]]:
+        payload = self._extract_entity_detection_payload(text)
+        entities = payload.get("entities") if isinstance(payload, dict) else []
+        if not isinstance(entities, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for item in entities[:12]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            entity_type = str(item.get("type") or "other").strip().lower() or "other"
+            try:
+                confidence = float(item.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            evidence = str(item.get("evidence") or item.get("reason") or "").strip()
+            normalized.append({
+                "name": name,
+                "type": entity_type,
+                "confidence": max(0.0, min(1.0, confidence)),
+                "evidence": evidence,
+            })
+        return normalized
+
+    def _append_entity_detection_record(self, session_id: str, payload: dict[str, Any]) -> None:
+        lock = getattr(self, "_entity_detection_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._entity_detection_lock = lock
+        record_path = self._entity_detection_path(session_id)
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(payload, ensure_ascii=False)
+        with lock:
+            with open(record_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+
+    def _build_entity_detection_prompt(self, event: MessageEvent, message_text: str) -> str:
+        platform = event.source.platform.value if event.source and event.source.platform else "unknown"
+        user_name = event.source.user_name or event.source.user_id or "unknown"
+        return (
+            "Return strict JSON only.\n"
+            "Extract durable named entities from this inbound message.\n"
+            "Schema: {\"entities\":[{\"name\":string,\"type\":\"person|company|project|product|location|event|other\",\"confidence\":number,\"evidence\":string}]}\n"
+            "Rules:\n"
+            "- Use exact surface forms from the message when possible.\n"
+            "- Omit generic nouns, pronouns, dates, times, and filler.\n"
+            "- Keep at most 12 entities.\n"
+            "- If there are none, return {\"entities\":[]}.\n\n"
+            f"Platform: {platform}\n"
+            f"Sender: {user_name}\n"
+            f"Message:\n{(message_text or '').strip()[:4000]}"
+        )
+
+    def _schedule_entity_detection(
+        self,
+        *,
+        event: MessageEvent,
+        message_text: str,
+        session_key: str,
+        session_id: str,
+    ) -> None:
+        if not (message_text or "").strip():
+            return
+        task = asyncio.create_task(
+            self._run_entity_detection_task(
+                event=event,
+                message_text=message_text,
+                session_key=session_key,
+                session_id=session_id,
+            )
+        )
+        background_tasks = getattr(self, "_background_tasks", None)
+        if not isinstance(background_tasks, set):
+            background_tasks = set()
+            self._background_tasks = background_tasks
+        try:
+            background_tasks.add(task)
+        except TypeError:
+            return
+        if hasattr(task, "add_done_callback"):
+            task.add_done_callback(background_tasks.discard)
+
+    async def _run_entity_detection_task(
+        self,
+        *,
+        event: MessageEvent,
+        message_text: str,
+        session_key: str,
+        session_id: str,
+    ) -> None:
+        del session_key  # reserved for future cross-message correlation
+        started_at = time.time()
+        record: dict[str, Any] = {
+            "timestamp": datetime.now().isoformat(),
+            "message_id": event.message_id,
+            "platform": event.source.platform.value if event.source and event.source.platform else None,
+            "chat_id": event.source.chat_id if event.source else None,
+            "user_id": event.source.user_id if event.source else None,
+            "user_name": event.source.user_name if event.source else None,
+            "model": self._ENTITY_DETECTION_MODEL,
+            "message_text": (message_text or "")[:4000],
+            "entities": [],
+        }
+
+        try:
+            runtime_kwargs = _resolve_entity_detection_runtime_kwargs()
+            runtime_source = runtime_kwargs.pop("source", None)
+            record["runtime_provider"] = runtime_kwargs.get("provider")
+            record["runtime_base_url"] = runtime_kwargs.get("base_url")
+            record["runtime_source"] = runtime_source
+            unsupported_error = _entity_detection_runtime_error(self._ENTITY_DETECTION_MODEL, runtime_kwargs)
+            if unsupported_error:
+                record["status"] = "skipped"
+                record["error"] = unsupported_error
+                self._append_entity_detection_record(session_id, record)
+                return
+            if not runtime_kwargs.get("api_key") and not runtime_kwargs.get("command"):
+                record["status"] = "skipped"
+                record["error"] = "No runtime credentials configured"
+                self._append_entity_detection_record(session_id, record)
+                return
+
+            from run_agent import AIAgent
+
+            prompt = self._build_entity_detection_prompt(event, message_text)
+            platform_key = "cli" if event.source.platform == Platform.LOCAL else event.source.platform.value
+            task_id = f"entity_{session_id}_{event.message_id or int(started_at)}"
+
+            def run_sync():
+                agent = AIAgent(
+                    model=self._ENTITY_DETECTION_MODEL,
+                    **runtime_kwargs,
+                    max_iterations=1,
+                    quiet_mode=True,
+                    verbose_logging=False,
+                    enabled_toolsets=[],
+                    reasoning_config={"enabled": False},
+                    session_id=task_id,
+                    platform=platform_key,
+                    user_id=event.source.user_id,
+                    session_db=None,
+                    skip_memory=True,
+                    skip_context_files=True,
+                    persist_session=False,
+                )
+                agent._print_fn = lambda *args, **kwargs: None
+                return agent.run_conversation(user_message=prompt, task_id=task_id)
+
+            loop = asyncio.get_running_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, run_sync),
+                timeout=self._ENTITY_DETECTION_TIMEOUT_SECONDS,
+            )
+            final_response = (result or {}).get("final_response", "")
+            error_text = str((result or {}).get("error") or "").strip()
+            if (result or {}).get("failed") or error_text:
+                record["status"] = "error"
+                record["error"] = error_text[:1000] or "Entity detection model call failed"
+                if final_response is not None:
+                    record["raw_response"] = str(final_response)[:4000]
+            else:
+                record["status"] = "ok"
+                record["entities"] = self._parse_entity_detection_response(final_response)
+                record["raw_response"] = str(final_response)[:4000]
+        except asyncio.TimeoutError:
+            record["status"] = "timeout"
+            record["error"] = f"Timed out after {self._ENTITY_DETECTION_TIMEOUT_SECONDS}s"
+        except Exception as exc:
+            record["status"] = "error"
+            record["error"] = str(exc)[:1000]
+
+        record["duration_ms"] = int((time.time() - started_at) * 1000)
+        self._append_entity_detection_record(session_id, record)
 
     def _set_adapter_auto_tts_disabled(self, adapter, chat_id: str, disabled: bool) -> None:
         """Update an adapter's in-memory auto-TTS suppression set if present."""
@@ -3900,6 +4253,13 @@ class GatewayRunner:
         )
         if message_text is None:
             return
+
+        self._schedule_entity_detection(
+            event=event,
+            message_text=message_text,
+            session_key=session_key,
+            session_id=session_entry.session_id,
+        )
 
         try:
             # Emit agent:start hook
@@ -7782,14 +8142,16 @@ class GatewayRunner:
     def _agent_config_signature(
         model: str,
         runtime: dict,
-        enabled_toolsets: list,
-        ephemeral_prompt: str,
+        enabled_toolsets: list[str],
+        allowed_tools: Optional[list[str]] = None,
+        disabled_tools: Optional[list[str]] = None,
+        ephemeral_prompt: str = "",
     ) -> str:
         """Compute a stable string key from agent config values.
 
         When this signature changes between messages, the cached AIAgent is
-        discarded and rebuilt.  When it stays the same, the cached agent is
-        reused — preserving the frozen system prompt and tool schemas for
+        discarded and rebuilt. When it stays the same, the cached agent is
+        reused, preserving the frozen system prompt and tool schemas for
         prompt cache hits.
         """
         import hashlib, json as _j
@@ -7809,6 +8171,8 @@ class GatewayRunner:
                 runtime.get("provider", ""),
                 runtime.get("api_mode", ""),
                 sorted(enabled_toolsets) if enabled_toolsets else [],
+                sorted(allowed_tools) if allowed_tools else [],
+                sorted(disabled_tools) if disabled_tools else [],
                 # reasoning_config excluded — it's set per-message on the
                 # cached agent and doesn't affect system prompt or tools.
                 ephemeral_prompt or "",
@@ -8152,6 +8516,7 @@ class GatewayRunner:
 
         from hermes_cli.tools_config import _get_platform_tools
         enabled_toolsets = sorted(_get_platform_tools(user_config, platform_key))
+        channel_restrictions = _resolve_channel_restrictions(user_config, source)
 
         display_config = user_config.get("display", {})
         if not isinstance(display_config, dict):
@@ -8479,6 +8844,9 @@ class GatewayRunner:
             event_channel_prompt = (channel_prompt or "").strip()
             if event_channel_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + event_channel_prompt).strip()
+            _channel_prompt = _build_channel_restrictions_prompt(channel_restrictions)
+            if _channel_prompt:
+                combined_ephemeral = (combined_ephemeral + "\n\n" + _channel_prompt).strip()
             if self._ephemeral_system_prompt:
                 combined_ephemeral = (combined_ephemeral + "\n\n" + self._ephemeral_system_prompt).strip()
 
@@ -8602,6 +8970,8 @@ class GatewayRunner:
                 turn_route["model"],
                 turn_route["runtime"],
                 enabled_toolsets,
+                channel_restrictions.get("allowed_tools") or [],
+                channel_restrictions.get("blocked_tools") or [],
                 combined_ephemeral,
             )
             agent = None
@@ -8629,6 +8999,8 @@ class GatewayRunner:
                     quiet_mode=True,
                     verbose_logging=False,
                     enabled_toolsets=enabled_toolsets,
+                    allowed_tools=channel_restrictions.get("allowed_tools") or None,
+                    disabled_tools=channel_restrictions.get("blocked_tools") or None,
                     ephemeral_system_prompt=combined_ephemeral or None,
                     prefill_messages=self._prefill_messages or None,
                     reasoning_config=reasoning_config,

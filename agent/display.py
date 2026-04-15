@@ -155,6 +155,11 @@ def get_tool_emoji(tool_name: str, default: str = "⚡") -> str:
     except Exception:
         pass
     # 3. Hardcoded fallback
+    fallback_emojis = {
+        "terminal": "💻",
+    }
+    if tool_name in fallback_emojis:
+        return fallback_emojis[tool_name]
     return default
 
 

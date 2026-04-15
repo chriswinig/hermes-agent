@@ -5204,8 +5204,11 @@ class HermesCLI:
                 print(f"(^_^)b Resumed job: {result['job']['name']} ({job_id})")
                 print(f"  Next run: {result['job'].get('next_run_at')}")
             elif action == "run":
-                print(f"(^_^)b Triggered job: {result['job']['name']} ({job_id})")
-                print("  It will run on the next scheduler tick.")
+                print(f"(^_^)b Ran job: {result['job']['name']} ({job_id})")
+                if result.get("output_file"):
+                    print(f"  Output: {result['output_file']}")
+                if result.get("error"):
+                    print(f"  Error: {result['error']}")
             else:
                 removed = result.get("removed_job", {})
                 print(f"(^_^)b Removed job: {removed.get('name', job_id)} ({job_id})")

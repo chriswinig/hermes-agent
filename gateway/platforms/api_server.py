@@ -1693,8 +1693,8 @@ class APIServerAdapter(BasePlatformAdapter):
             remove_job as _cron_remove,
             pause_job as _cron_pause,
             resume_job as _cron_resume,
-            trigger_job as _cron_trigger,
         )
+        from cron.scheduler import execute_job_now as _cron_run_now
         # Wrap as staticmethod to prevent descriptor binding — these are plain
         # module functions, not instance methods.  Without this, self._cron_*()
         # injects ``self`` as the first positional argument and every call
@@ -1706,7 +1706,7 @@ class APIServerAdapter(BasePlatformAdapter):
         _cron_remove = staticmethod(_cron_remove)
         _cron_pause = staticmethod(_cron_pause)
         _cron_resume = staticmethod(_cron_resume)
-        _cron_trigger = staticmethod(_cron_trigger)
+        _cron_run_now = staticmethod(_cron_run_now)
         _CRON_AVAILABLE = True
     except ImportError:
         pass
@@ -1918,10 +1918,11 @@ class APIServerAdapter(BasePlatformAdapter):
         if id_err:
             return id_err
         try:
-            job = self._cron_trigger(job_id)
+            job = self._cron_get(job_id)
             if not job:
                 return web.json_response({"error": "Job not found"}, status=404)
-            return web.json_response({"job": job})
+            result = await asyncio.to_thread(self._cron_run_now, job)
+            return web.json_response(result)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
