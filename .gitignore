@@ -32,6 +32,7 @@ data/*
 node_modules/
 browser-use/
 agent-browser/
+.playwright-mcp/
 # Private keys
 *.ppk
 *.pem
