@@ -3033,6 +3033,40 @@ class TelegramAdapter(BasePlatformAdapter):
         # Download document files to cache for agent processing
         elif msg.document:
             doc = msg.document
+            image_ext = ""
+            if doc.file_name:
+                _, candidate_ext = os.path.splitext(doc.file_name)
+                candidate_ext = candidate_ext.lower()
+                if candidate_ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+                    image_ext = ".jpg" if candidate_ext == ".jpeg" else candidate_ext
+            if not image_ext and doc.mime_type and doc.mime_type.startswith("image/"):
+                mime_ext = "." + doc.mime_type.split("/", 1)[1].split(";", 1)[0].strip().lower()
+                if mime_ext == ".jpeg":
+                    mime_ext = ".jpg"
+                if mime_ext in (".png", ".jpg", ".webp", ".gif"):
+                    image_ext = mime_ext
+            if image_ext:
+                try:
+                    file_obj = await doc.get_file()
+                    image_bytes = await file_obj.download_as_bytearray()
+                    cached_path = cache_image_from_bytes(bytes(image_bytes), ext=image_ext)
+                    image_mime = doc.mime_type if doc.mime_type and doc.mime_type.startswith("image/") else (
+                        "image/jpeg" if image_ext == ".jpg" else f"image/{image_ext.lstrip('.')}"
+                    )
+                    event.media_urls = [cached_path]
+                    event.media_types = [image_mime]
+                    event.message_type = MessageType.PHOTO
+                    logger.info("[Telegram] Cached image-document as photo at %s", cached_path)
+                    media_group_id = getattr(msg, "media_group_id", None)
+                    if media_group_id:
+                        await self._queue_media_group_event(str(media_group_id), event)
+                    else:
+                        batch_key = self._photo_batch_key(event, msg)
+                        self._enqueue_photo_event(batch_key, event)
+                    return
+                except Exception as e:
+                    logger.warning("[Telegram] Failed to cache image-document: %s", e, exc_info=True)
+
             try:
                 # Determine file extension
                 ext = ""

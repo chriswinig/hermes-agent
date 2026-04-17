@@ -357,6 +357,53 @@ class TestDocumentDownloadBlock:
         # handle_message should still be called (the handler catches the exception)
         adapter.handle_message.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_png_document_is_routed_through_photo_pipeline(self, adapter):
+        file_obj = _make_file_obj(b"fake-png-bytes")
+        file_obj.file_path = "documents/Screenshot.png"
+        doc = _make_document(
+            file_name="Screenshot.png",
+            mime_type="image/png",
+            file_size=1024,
+            file_obj=file_obj,
+        )
+        msg = _make_message(document=doc, caption="what's in this?")
+
+        with patch("gateway.platforms.telegram.cache_image_from_bytes", return_value="/tmp/screenshot.png"):
+            await adapter._handle_media_message(_make_update(msg), MagicMock())
+            assert adapter.handle_message.await_count == 0
+            await asyncio.sleep(adapter._media_batch_delay_seconds + 0.05)
+
+        adapter.handle_message.assert_awaited_once()
+        event = adapter.handle_message.await_args.args[0]
+        assert event.message_type == MessageType.PHOTO
+        assert event.text == "what's in this?"
+        assert event.media_urls == ["/tmp/screenshot.png"]
+        assert event.media_types == ["image/png"]
+
+    @pytest.mark.asyncio
+    async def test_image_document_with_mime_only_is_routed_through_photo_pipeline(self, adapter):
+        file_obj = _make_file_obj(b"fake-png-bytes")
+        file_obj.file_path = "documents/file"
+        doc = _make_document(
+            file_name=None,
+            mime_type="image/png",
+            file_size=1024,
+            file_obj=file_obj,
+        )
+        msg = _make_message(document=doc)
+
+        with patch("gateway.platforms.telegram.cache_image_from_bytes", return_value="/tmp/mime-only.png"):
+            await adapter._handle_media_message(_make_update(msg), MagicMock())
+            assert adapter.handle_message.await_count == 0
+            await asyncio.sleep(adapter._media_batch_delay_seconds + 0.05)
+
+        adapter.handle_message.assert_awaited_once()
+        event = adapter.handle_message.await_args.args[0]
+        assert event.message_type == MessageType.PHOTO
+        assert event.media_urls == ["/tmp/mime-only.png"]
+        assert event.media_types == ["image/png"]
+
 
 class TestVideoDownloadBlock:
     @pytest.mark.asyncio
