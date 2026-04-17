@@ -70,7 +70,7 @@ def _make_runner(tmp_path):
     runner.session_store = MagicMock()
     runner.delivery_router = MagicMock()
     runner._set_session_env = lambda _context: None
-    runner._clear_session_env = lambda: None
+    runner._clear_session_env = lambda _tokens=None: None
     runner._has_setup_skill = lambda: False
     runner._should_send_voice_reply = lambda *args, **kwargs: False
     return runner
