@@ -1412,7 +1412,20 @@ def _run_single_child(
                     except Exception:
                         pass
 
-            if _heartbeat_stop.wait(_HEARTBEAT_INTERVAL):
+            # While the child is inside a tool, keep the parent activity a bit
+            # warmer than the normal idle cadence. Long-running tools are the
+            # exact case this heartbeat protects from gateway inactivity kills,
+            # and the shorter wait also makes the stale-vs-in-tool behavior
+            # deterministic under test scheduler jitter.
+            try:
+                _wait_interval = (
+                    _HEARTBEAT_INTERVAL / 3
+                    if child_summary.get("current_tool")
+                    else _HEARTBEAT_INTERVAL
+                )
+            except Exception:
+                _wait_interval = _HEARTBEAT_INTERVAL
+            if _heartbeat_stop.wait(_wait_interval):
                 break
 
     _heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True)
