@@ -309,6 +309,8 @@ def get_tool_definitions(
         cache_key = (
             frozenset(enabled_toolsets) if enabled_toolsets is not None else None,
             frozenset(disabled_toolsets) if disabled_toolsets else None,
+            frozenset(allowed_tools) if allowed_tools else None,
+            frozenset(disabled_tools) if disabled_tools else None,
             registry._generation,
             cfg_fp,
         )
@@ -322,7 +324,13 @@ def get_tool_definitions(
             # schemas are treated as read-only by all known callers.
             return list(cached)
 
-    result = _compute_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode)
+    result = _compute_tool_definitions(
+        enabled_toolsets,
+        disabled_toolsets,
+        allowed_tools,
+        disabled_tools,
+        quiet_mode,
+    )
     if quiet_mode:
         # Cache the freshly-computed list, but hand callers a shallow copy so
         # downstream mutations (e.g. run_agent appending memory/LCM tool
@@ -339,6 +347,8 @@ def get_tool_definitions(
 def _compute_tool_definitions(
     enabled_toolsets: List[str] = None,
     disabled_toolsets: List[str] = None,
+    allowed_tools: List[str] = None,
+    disabled_tools: List[str] = None,
     quiet_mode: bool = False,
 ) -> List[Dict[str, Any]]:
     """Uncached implementation of :func:`get_tool_definitions`."""
