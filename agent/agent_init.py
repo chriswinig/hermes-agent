@@ -86,6 +86,8 @@ def init_agent(
     tool_delay: float = 1.0,
     enabled_toolsets: List[str] = None,
     disabled_toolsets: List[str] = None,
+    allowed_tools: List[str] = None,
+    disabled_tools: List[str] = None,
     save_trajectories: bool = False,
     verbose_logging: bool = False,
     quiet_mode: bool = False,
@@ -151,6 +153,8 @@ def init_agent(
         tool_delay (float): Delay between tool calls in seconds (default: 1.0)
         enabled_toolsets (List[str]): Only enable tools from these toolsets (optional)
         disabled_toolsets (List[str]): Disable tools from these toolsets (optional)
+        allowed_tools (List[str]): Only enable these tool names after toolset filtering (optional)
+        disabled_tools (List[str]): Disable these tool names after toolset filtering (optional)
         save_trajectories (bool): Whether to save conversation trajectories to JSONL files (default: False)
         verbose_logging (bool): Enable verbose logging for debugging (default: False)
         quiet_mode (bool): Suppress progress output for clean CLI experience (default: False)
@@ -388,6 +392,8 @@ def init_agent(
     # Store toolset filtering options
     agent.enabled_toolsets = enabled_toolsets
     agent.disabled_toolsets = disabled_toolsets
+    agent.allowed_tools = allowed_tools
+    agent.disabled_tools = disabled_tools
     
     # Model response configuration
     agent.max_tokens = max_tokens  # None = use model default
@@ -802,6 +808,8 @@ def init_agent(
     agent.tools = _ra().get_tool_definitions(
         enabled_toolsets=enabled_toolsets,
         disabled_toolsets=disabled_toolsets,
+        allowed_tools=allowed_tools,
+        disabled_tools=disabled_tools,
         quiet_mode=agent.quiet_mode,
     )
     
@@ -1052,6 +1060,7 @@ def init_agent(
     if not isinstance(_agent_section, dict):
         _agent_section = {}
     agent._tool_use_enforcement = _agent_section.get("tool_use_enforcement", "auto")
+    agent._brain_first_lookup_enforcement = _agent_section.get("brain_first_lookup_enforcement", "auto")
 
     # App-level API retry count (wraps each model API call).  Default 3,
     # overridable via agent.api_max_retries in config.yaml.  See #11616.

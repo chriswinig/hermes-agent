@@ -104,6 +104,7 @@ def test_agent_passes_disabled_tools_to_tool_loader():
     ):
         AIAgent(
             api_key="test-k...7890",
+            base_url="https://openrouter.ai/api/v1",
             quiet_mode=True,
             skip_context_files=True,
             skip_memory=True,
@@ -122,6 +123,7 @@ def test_agent_passes_allowed_tools_to_tool_loader():
     ):
         AIAgent(
             api_key="test-k...7890",
+            base_url="https://openrouter.ai/api/v1",
             quiet_mode=True,
             skip_context_files=True,
             skip_memory=True,
@@ -1287,6 +1289,7 @@ class TestBrainFirstLookupEnforcementConfig:
             a = AIAgent(
                 model=model,
                 api_key="test-key-1234567890",
+                base_url="https://openrouter.ai/api/v1",
                 quiet_mode=True,
                 skip_context_files=True,
                 skip_memory=True,
