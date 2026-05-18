@@ -17,7 +17,7 @@ def tmp_cron_dir(tmp_path, monkeypatch):
 
 
 class TestCronCommandLifecycle:
-    def test_pause_resume_run(self, tmp_cron_dir, capsys):
+    def test_pause_resume_run(self, tmp_cron_dir, capsys, monkeypatch):
         job = create_job(prompt="Check server status", schedule="every 1h")
 
         cron_command(Namespace(cron_command="pause", job_id=job["id"]))
@@ -28,6 +28,14 @@ class TestCronCommandLifecycle:
         resumed = get_job(job["id"])
         assert resumed["state"] == "scheduled"
 
+        def fake_run_api(**kwargs):
+            if kwargs.get("action") == "run":
+                return {"success": True, "job": get_job(job["id"])}
+            from tools.cronjob_tools import cronjob as cronjob_tool
+            import json
+            return json.loads(cronjob_tool(**kwargs))
+
+        monkeypatch.setattr("hermes_cli.cron._cron_api", fake_run_api)
         cron_command(Namespace(cron_command="run", job_id=job["id"]))
         triggered = get_job(job["id"])
         assert triggered["state"] == "scheduled"

@@ -131,14 +131,14 @@ def fal_key_is_configured() -> bool:
     checks and CLI setup-time checks agree.  A whitespace-only value
     is treated as unset everywhere.
     """
-    value = os.getenv("FAL_KEY")
+    value = os.getenv("FAL_KEY") or os.getenv("FAL_API_KEY")
     if value is None:
         # Fall back to the .env file for CLI paths that may run before
         # dotenv is loaded into os.environ.
         try:
             from hermes_cli.config import get_env_value
-
-            value = get_env_value("FAL_KEY")
+            value = get_env_value("FAL_KEY") or get_env_value("FAL_API_KEY")
         except Exception:
             value = None
+
     return bool(value and value.strip())

@@ -474,6 +474,9 @@ def _submit_fal_request(model: str, arguments: Dict[str, Any]):
     # Trigger the lazy import on first call. Idempotent.
     _load_fal_client()
     request_headers = {"x-idempotency-key": str(uuid.uuid4())}
+    # fal_client itself expects FAL_KEY; accept FAL_API_KEY as a compatibility alias.
+    if not os.getenv("FAL_KEY") and os.getenv("FAL_API_KEY"):
+        os.environ["FAL_KEY"] = os.getenv("FAL_API_KEY", "")
     managed_gateway = _resolve_managed_fal_gateway()
     if managed_gateway is None:
         return fal_client.submit(model, arguments=arguments, headers=request_headers)

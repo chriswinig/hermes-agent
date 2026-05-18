@@ -1440,7 +1440,7 @@ def _run_single_child(
             # deterministic under test scheduler jitter.
             try:
                 _wait_interval = (
-                    _HEARTBEAT_INTERVAL / 3
+                    _HEARTBEAT_INTERVAL / 10
                     if child_summary.get("current_tool")
                     else _HEARTBEAT_INTERVAL
                 )

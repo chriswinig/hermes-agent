@@ -135,7 +135,8 @@ class TestSessionEntryReason:
         suspended = store.suspend_recently_active(max_age_seconds=120)
 
         assert suspended == 1
-        assert store._entries["recent"].suspended is True
+        assert store._entries["recent"].resume_pending is True
+        assert store._entries["recent"].resume_reason == "restart_interrupted"
         assert store._entries["old"].suspended is False
         assert store._entries["already"].suspended is True
 

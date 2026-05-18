@@ -14,6 +14,7 @@ import contextvars
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -703,6 +704,39 @@ def _get_script_timeout() -> int:
         logger.debug("Failed to load cron script timeout from config: %s", exc)
 
     return _DEFAULT_SCRIPT_TIMEOUT
+
+
+def _resolve_script_command(path: Path) -> list[str]:
+    """Return the command used to execute a validated cron script.
+
+    Prefer the script's shebang when present so shell scripts and other
+    interpreters work under cron. Fall back to sane defaults for common
+    extensions when no shebang exists.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            first_line = handle.readline().strip()
+    except UnicodeDecodeError:
+        first_line = ""
+
+    if first_line.startswith("#!"):
+        interpreter = first_line[2:].strip()
+        if interpreter:
+            return [*shlex.split(interpreter), str(path)]
+
+    suffix = path.suffix.lower()
+    if suffix == ".py":
+        return [sys.executable, str(path)]
+    if suffix in {".sh", ".bash"}:
+        bash = shutil.which("bash") or "/bin/bash"
+        return [bash, str(path)]
+    if os.access(path, os.X_OK):
+        return [str(path)]
+
+    raise ValueError(
+        "Unsupported script type without shebang. "
+        "Add a shebang (for example #!/bin/bash or #!/usr/bin/env python3)."
+    )
 
 
 def _run_job_script(script_path: str) -> tuple[bool, str]:
@@ -1664,6 +1698,59 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             cleanup_stale_async_clients()
         except Exception as e:
             logger.debug("Job '%s': failed to reap stale auxiliary clients: %s", job_id, e)
+
+
+def execute_job_now(job: dict, adapters=None, loop=None) -> dict:
+    """Run a cron job immediately and return execution details.
+
+    Mirrors the scheduler tick path for manual `cronjob(action='run')` calls:
+    execute, save output, deliver if appropriate, and mark the job run.
+    """
+    delivery_error = None
+    output_file = None
+    success = False
+    output = ""
+    final_response = ""
+    error = None
+    try:
+        success, output, final_response, error = run_job(job)
+        output_file = save_job_output(job["id"], output)
+        deliver_content = final_response if success else f"⚠️ Cron job '{job.get('name', job['id'])}' failed:\n{error}"
+        should_deliver = bool(deliver_content)
+        if should_deliver and success and SILENT_MARKER in deliver_content.strip().upper():
+            should_deliver = False
+        if should_deliver:
+            try:
+                delivery_error = _deliver_result(job, deliver_content, adapters=adapters, loop=loop)
+            except Exception as de:
+                delivery_error = str(de)
+                logger.error("Delivery failed for manual job %s: %s", job["id"], de)
+        if success and not final_response:
+            success = False
+            error = "Agent completed but produced empty response (model error, timeout, or misconfiguration)"
+        mark_job_run(job["id"], success, error, delivery_error=delivery_error)
+    except Exception as exc:
+        success = False
+        error = str(exc)
+        logger.error("Error manually processing job %s: %s", job.get("id"), exc)
+        if job.get("id"):
+            mark_job_run(job["id"], False, error)
+
+    refreshed = None
+    if job.get("id"):
+        try:
+            from cron.jobs import get_job as _get_job
+            refreshed = _get_job(job["id"])
+        except Exception:
+            refreshed = None
+    return {
+        "success": success,
+        "job": refreshed or job,
+        "output_file": output_file,
+        "final_response": final_response,
+        "error": error,
+        "delivery_error": delivery_error,
+    }
 
 
 def tick(verbose: bool = True, adapters=None, loop=None) -> int:

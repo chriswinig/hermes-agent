@@ -10869,7 +10869,11 @@ class GatewayRunner:
             _, cleaned = adapter.extract_images(response)
             local_files, _ = adapter.extract_local_files(cleaned)
 
-            _thread_meta = self._thread_metadata_for_source(event.source, self._reply_anchor_for_event(event))
+            if hasattr(self, "_thread_metadata_for_source"):
+                _thread_meta = self._thread_metadata_for_source(event.source, self._reply_anchor_for_event(event))
+            else:
+                thread_id = getattr(event.source, "thread_id", None)
+                _thread_meta = {"thread_id": thread_id} if thread_id is not None else None
 
             from gateway.platforms.base import should_send_media_as_audio
 
