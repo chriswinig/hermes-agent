@@ -20,6 +20,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 concurrency:
   group: nix-lockfile-fix-${{ github.event.issue.number || github.event.inputs.pr_number || github.ref }}
@@ -39,27 +40,34 @@ jobs:
   #   3. Job-level concurrency with cancel-in-progress: true ensures
   #      back-to-back pushes collapse to the newest; ref: main checkout
   #      always operates on the latest branch state.
-  #   4. Uses a GitHub App token (not GITHUB_TOKEN) so the fix commit
-  #      triggers downstream nix.yml verification.
+  #   4. Uses a GitHub App token when configured, otherwise falls back
+  #      to GITHUB_TOKEN and explicitly dispatches nix.yml verification.
   auto-fix-main:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      APP_TOKEN_CONFIGURED: ${{ secrets.APP_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
     concurrency:
       group: auto-fix-main
       cancel-in-progress: true
     steps:
       - name: Generate GitHub App token
         id: app-token
+        if: env.APP_TOKEN_CONFIGURED == 'true'
         uses: actions/create-github-app-token@7bfa3a4717ef143a604ee0a99d859b8886a96d00  # v1.9.3
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
+      - name: Note token fallback
+        if: ${{ steps.app-token.outputs.token == '' }}
+        run: echo "GitHub App secrets are not configured; falling back to GITHUB_TOKEN and explicit nix.yml dispatch."
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           ref: main
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: ./.github/actions/nix-setup
         with:
@@ -72,6 +80,8 @@ jobs:
       - name: Commit & push
         if: steps.apply.outputs.changed == 'true'
         shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           set -euo pipefail
 
@@ -98,9 +108,11 @@ jobs:
           # commit during the nix build. Without this, a non-fast-forward
           # rejection silently loses the fix. If package files changed during
           # the rebase, abort — a fresh auto-fix run will handle the new state.
+          pushed=false
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
-              exit 0
+              pushed=true
+              break
             fi
             echo "::warning::Push attempt $attempt failed (non-fast-forward?), rebasing…"
             git fetch origin main
@@ -118,8 +130,15 @@ jobs:
 
             git rebase origin/main
           done
-          echo "::error::Failed to push after 3 rebase attempts"
-          exit 1
+          if [ "$pushed" != "true" ]; then
+            echo "::error::Failed to push after 3 rebase attempts"
+            exit 1
+          fi
+
+          # Pushes made with GITHUB_TOKEN do not reliably trigger downstream
+          # push workflows, so dispatch nix.yml explicitly. If an app token was
+          # used and push already triggered verification, this is harmless.
+          gh workflow run nix.yml --ref main
 
   # ── PR fix (manual / checkbox) ─────────────────────────────────────
   # Existing behavior: run on manual dispatch OR when a task-list
