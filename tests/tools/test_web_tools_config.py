@@ -383,11 +383,28 @@ class TestBackendSelection:
              patch.dict(os.environ, {"FIRECRAWL_API_KEY": "fc-test"}):
             assert _get_backend() == "firecrawl"
 
-    def test_fallback_no_keys_defaults_to_firecrawl(self):
-        """No keys, no config → 'firecrawl' (will fail at client init)."""
+    def test_fallback_no_keys_uses_free_local_extract_when_installed(self):
+        """No keys, no config → Crawl4AI if installed; otherwise firecrawl legacy default."""
         from tools.web_tools import _get_backend
         with patch("tools.web_tools._load_web_config", return_value={}):
-            assert _get_backend() == "firecrawl"
+            assert _get_backend() in {"crawl4ai", "firecrawl"}
+
+    def test_check_web_api_key_accepts_configured_crawl4ai(self):
+        """Configured Crawl4AI should enable web tools when the package is installed."""
+        from tools.web_tools import check_web_api_key
+        with patch("tools.web_tools._load_web_config", return_value={"backend": "crawl4ai"}), \
+             patch("tools.web_tools._crawl4ai_package_importable", return_value=True):
+            assert check_web_api_key() is True
+
+    def test_check_web_api_key_autodetects_crawl4ai(self):
+        """No keys/config still enables local extraction when Crawl4AI is installed."""
+        from tools.web_tools import check_web_api_key
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch("tools.web_tools._crawl4ai_package_importable", return_value=True), \
+             patch("tools.web_tools._has_env", return_value=False), \
+             patch("tools.web_tools.check_firecrawl_api_key", return_value=False), \
+             patch("tools.web_tools._ddgs_package_importable", return_value=False):
+            assert check_web_api_key() is True
 
     def test_invalid_config_falls_through_to_fallback(self):
         """web.backend=invalid → ignored, uses key-based fallback."""
@@ -603,7 +620,8 @@ class TestCheckWebApiKey:
 
     def test_no_keys_returns_false(self):
         from tools.web_tools import check_web_api_key
-        assert check_web_api_key() is False
+        with patch("tools.web_tools._crawl4ai_package_importable", return_value=False):
+            assert check_web_api_key() is False
 
     def test_both_keys_returns_true(self):
         with patch.dict(os.environ, {

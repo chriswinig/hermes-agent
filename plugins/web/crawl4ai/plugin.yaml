@@ -1,0 +1,7 @@
+name: web-crawl4ai
+version: 1.0.0
+description: "Crawl4AI local web extraction backend — free, API-keyless, Playwright-based markdown extraction."
+author: NousResearch
+kind: backend
+provides_web_providers:
+  - crawl4ai

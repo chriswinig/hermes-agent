@@ -130,7 +130,7 @@ def _get_backend() -> str:
     keys manually without running setup.
     """
     configured = (_load_web_config().get("backend") or "").lower().strip()
-    if configured in {"parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs", "xai"}:
+    if configured in {"parallel", "firecrawl", "tavily", "exa", "crawl4ai", "searxng", "brave-free", "ddgs", "xai"}:
         return configured
 
     # Fallback for manual / legacy config — pick the highest-priority
@@ -143,6 +143,7 @@ def _get_backend() -> str:
         ("parallel", _has_env("PARALLEL_API_KEY")),
         ("tavily", _has_env("TAVILY_API_KEY")),
         ("exa", _has_env("EXA_API_KEY")),
+        ("crawl4ai", _crawl4ai_package_importable()),
         ("searxng", _has_env("SEARXNG_URL")),
         ("brave-free", _has_env("BRAVE_SEARCH_API_KEY")),
         ("ddgs", _ddgs_package_importable()),
@@ -196,6 +197,8 @@ def _is_backend_available(backend: str) -> bool:
     """Return True when the selected backend is currently usable."""
     if backend == "exa":
         return _has_env("EXA_API_KEY")
+    if backend == "crawl4ai":
+        return _crawl4ai_package_importable()
     if backend == "parallel":
         return _has_env("PARALLEL_API_KEY")
     if backend == "firecrawl":
@@ -231,6 +234,15 @@ def _ddgs_package_importable() -> bool:
     """
     try:
         import ddgs  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _crawl4ai_package_importable() -> bool:
+    """Return True when the optional ``crawl4ai`` package can be imported."""
+    try:
+        import crawl4ai  # noqa: F401
         return True
     except ImportError:
         return False
@@ -818,10 +830,11 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         if is_interrupted():
             return tool_error("Interrupted", success=False)
 
-        # Dispatch through the web search registry. All 7 providers
-        # (brave-free, ddgs, searxng, exa, parallel, tavily, firecrawl)
-        # now live as plugins; the dispatcher is just a registry lookup +
-        # delegation. Sync only — every provider's search() is sync.
+        # Dispatch through the web search registry. Bundled providers
+        # (brave-free, crawl4ai, ddgs, searxng, exa, parallel, tavily,
+        # firecrawl, xai) now live as plugins; the dispatcher is just a
+        # registry lookup + delegation. Sync only — every search-capable
+        # provider's search() is sync.
         _ensure_web_plugins_loaded()
         from agent.web_search_registry import (
             get_active_search_provider,
@@ -840,8 +853,9 @@ def web_search_tool(query: str, limit: int = 5) -> str:
             response_data = {
                 "success": False,
                 "error": (
-                    "No web search provider configured. "
-                    "Run `hermes tools` to set one up."
+                    "Error searching web: No web search provider configured. "
+                    "Run `hermes tools` to set one up, or configure a search backend "
+                    "such as FIRECRAWL_API_KEY."
                 ),
             }
         else:
@@ -948,10 +962,9 @@ async def web_extract_tool(
         else:
             backend = _get_extract_backend()
 
-            # All seven providers (brave-free, ddgs, searxng, exa, parallel,
-            # tavily, firecrawl) now live as plugins. The dispatcher is a
+            # Bundled providers now live as plugins. The dispatcher is a
             # registry lookup + delegation. Some providers' extract() is
-            # async (parallel, firecrawl), others sync (exa, tavily) — we
+            # async (parallel, firecrawl, crawl4ai), others sync (exa, tavily) — we
             # detect coroutine functions and await; sync functions run
             # inline (the policy gate, SSRF re-check, etc. live inside the
             # provider itself for the firecrawl per-URL loop).
@@ -976,7 +989,7 @@ async def web_extract_tool(
                             "error": (
                                 f"{provider.display_name} is a search-only "
                                 "backend and cannot extract URL content. "
-                                "Set web.extract_backend to firecrawl, "
+                                "Set web.extract_backend to crawl4ai, firecrawl, "
                                 "tavily, exa, or parallel."
                             ),
                         },
@@ -989,7 +1002,7 @@ async def web_extract_tool(
                             "success": False,
                             "error": (
                                 "No web extract provider configured. "
-                                "Set web.extract_backend to firecrawl, "
+                                "Set web.extract_backend to crawl4ai, firecrawl, "
                                 "tavily, exa, or parallel."
                             ),
                         },
@@ -1155,11 +1168,11 @@ async def web_extract_tool(
 def check_web_api_key() -> bool:
     """Check whether the configured web backend is available."""
     configured = _load_web_config().get("backend", "").lower().strip()
-    if configured in {"exa", "parallel", "firecrawl", "tavily", "searxng", "brave-free", "ddgs"}:
+    if configured in {"exa", "parallel", "firecrawl", "tavily", "crawl4ai", "searxng", "brave-free", "ddgs"}:
         return _is_backend_available(configured)
     return any(
         _is_backend_available(backend)
-        for backend in ("exa", "parallel", "firecrawl", "tavily", "searxng", "brave-free", "ddgs")
+        for backend in ("exa", "parallel", "firecrawl", "tavily", "crawl4ai", "searxng", "brave-free", "ddgs")
     )
 
 
