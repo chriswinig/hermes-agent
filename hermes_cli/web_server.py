@@ -1748,10 +1748,18 @@ async def get_sessions(
             archived_only = archived == "only"
             include_archived = archived == "include"
             # Optional source scoping: ``source`` includes a single class,
-            # ``exclude_sources`` (comma-separated) drops classes. The desktop
-            # uses these to split recents (exclude=cron) from the cron-jobs
-            # section (source=cron) into two independent lists.
-            exclude_list = [s for s in (exclude_sources or "").split(",") if s.strip()]
+            # ``exclude_sources`` (comma-separated) drops classes. By default,
+            # keep background scheduler/helper runs out of the human-facing
+            # desktop session sidebar unless explicitly requested.
+            default_hidden_sources = [
+                "cron",
+                "gmail-review",
+                "drift-detection",
+                "cross-pollinate",
+            ]
+            exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+            if not source and not exclude_list:
+                exclude_list = default_hidden_sources
             sessions = db.list_sessions_rich(
                 source=source or None,
                 exclude_sources=exclude_list or None,

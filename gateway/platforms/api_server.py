@@ -1367,8 +1367,18 @@ class APIServerAdapter(BasePlatformAdapter):
         offset = self._parse_nonnegative_int(request.query.get("offset"), default=0, maximum=1_000_000)
         source = request.query.get("source") or None
         include_children = _coerce_request_bool(request.query.get("include_children"), default=False)
+        # Desktop's default session sidebar should show human-facing sessions, not
+        # background scheduler/model-helper runs. Keep explicit ?source=cron (or
+        # any hidden source) available for debugging/admin views.
+        exclude_sources = None if source else [
+            "cron",
+            "gmail-review",
+            "drift-detection",
+            "cross-pollinate",
+        ]
         sessions = db.list_sessions_rich(
             source=source,
+            exclude_sources=exclude_sources,
             limit=limit,
             offset=offset,
             include_children=include_children,
