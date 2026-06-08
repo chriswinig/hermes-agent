@@ -1402,6 +1402,7 @@ async def get_sessions(
     min_messages: int = 0,
     archived: str = "exclude",
     order: str = "created",
+    source: str | None = None,
 ):
     """List sessions.
 
@@ -1432,7 +1433,16 @@ async def get_sessions(
             min_message_count = max(0, min_messages)
             archived_only = archived == "only"
             include_archived = archived == "include"
+            hidden_background_sources = [
+                "cron",
+                "gmail-review",
+                "drift-detection",
+                "cross-pollinate",
+            ]
+            exclude_sources = None if source else hidden_background_sources
             sessions = db.list_sessions_rich(
+                source=source,
+                exclude_sources=exclude_sources,
                 limit=limit,
                 offset=offset,
                 min_message_count=min_message_count,
@@ -1441,6 +1451,8 @@ async def get_sessions(
                 order_by_last_active=order == "recent",
             )
             total = db.session_count(
+                source=source,
+                exclude_sources=exclude_sources,
                 min_message_count=min_message_count,
                 include_archived=include_archived,
                 archived_only=archived_only,
