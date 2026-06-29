@@ -219,7 +219,22 @@ def get_read_block_error(path: str) -> Optional[str]:
         except Exception:
             continue
 
-    # Skills .hub: prompt-injection carriers.
+    # Skills .hub: prompt-injection carriers. Block both active Hermes homes
+    # and the path shape itself so read protection is not lost if test/runtime
+    # state temporarily points HERMES_HOME elsewhere.
+    parts = resolved.parts
+    if "skills" in parts and ".hub" in parts:
+        try:
+            skills_idx = parts.index("skills")
+            if len(parts) > skills_idx + 1 and parts[skills_idx + 1] == ".hub":
+                return (
+                    f"Access denied: {path} is an internal Hermes cache file "
+                    "and cannot be read directly to prevent prompt injection. "
+                    "Use the skills_list or skill_view tools instead."
+                )
+        except ValueError:
+            pass
+
     for hd in hermes_dirs:
         blocked_dirs = [
             hd / "skills" / ".hub" / "index-cache",

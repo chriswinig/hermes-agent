@@ -104,8 +104,13 @@ def _build_subprocess_env() -> dict[str, str]:
     # provider credentials. Route through the central helper so Tier-1 secrets
     # (gateway bot tokens, GitHub auth, infra) are still stripped (#29157).
     env = hermes_subprocess_env(inherit_credentials=True)
+    # Copilot stores/authenticates against the OS user's real home. Do not let
+    # the generic terminal subprocess HOME policy remap this ACP process to the
+    # Hermes profile home in container/profile mode.
     home = _resolve_home_dir()
     env["HOME"] = home
+    env["HERMES_REAL_HOME"] = home
+    env["TERMINAL_HOME_MODE"] = "real"
     from hermes_constants import apply_subprocess_home_env
     apply_subprocess_home_env(env)
     return env

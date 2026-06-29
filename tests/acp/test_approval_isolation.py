@@ -211,7 +211,17 @@ class TestAcpExecAskGate:
         monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
         monkeypatch.delenv("HERMES_YOLO_MODE", raising=False)
 
-        from tools.approval import check_all_command_guards
+        from tools.approval import (
+            _permanent_approved,
+            _session_approved,
+            check_all_command_guards,
+        )
+
+        # This test asserts routing into the callback. It must not be bypassed
+        # by permanent/session approvals loaded from the surrounding test
+        # process or developer config.
+        _permanent_approved.clear()
+        _session_approved.clear()
 
         called_with = []
 

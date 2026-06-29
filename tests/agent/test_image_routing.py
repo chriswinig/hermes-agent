@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 
+import agent.image_routing as _image_routing
 from agent.image_routing import (
     _coerce_capability_bool,
     _coerce_mode,
@@ -77,39 +78,39 @@ class TestDecideImageInputMode:
         cfg = {"agent": {"image_input_mode": "native"}}
         # Non-vision model, aux-vision explicitly configured: native still wins.
         cfg["auxiliary"] = {"vision": {"provider": "openrouter", "model": "foo"}}
-        with patch("agent.image_routing._lookup_supports_vision", return_value=False):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=False):
             assert decide_image_input_mode("openrouter", "some-non-vision-model", cfg) == "native"
 
     def test_explicit_text_overrides_everything(self):
         cfg = {"agent": {"image_input_mode": "text"}}
-        with patch("agent.image_routing._lookup_supports_vision", return_value=True):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=True):
             assert decide_image_input_mode("anthropic", "claude-sonnet-4", cfg) == "text"
 
     def test_auto_with_vision_capable_model(self):
-        with patch("agent.image_routing._lookup_supports_vision", return_value=True):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=True):
             assert decide_image_input_mode("anthropic", "claude-sonnet-4", {}) == "native"
 
     def test_auto_with_non_vision_model(self):
-        with patch("agent.image_routing._lookup_supports_vision", return_value=False):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=False):
             assert decide_image_input_mode("openrouter", "qwen/qwen3-235b", {}) == "text"
 
     def test_auto_with_unknown_model(self):
-        with patch("agent.image_routing._lookup_supports_vision", return_value=None):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=None):
             assert decide_image_input_mode("openrouter", "brand-new-slug", {}) == "text"
 
     def test_auto_respects_aux_vision_override_even_for_vision_model(self):
         """If the user configured a dedicated vision backend, don't bypass it."""
         cfg = {"auxiliary": {"vision": {"provider": "openrouter", "model": "google/gemini-2.5-flash"}}}
-        with patch("agent.image_routing._lookup_supports_vision", return_value=True):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=True):
             assert decide_image_input_mode("anthropic", "claude-sonnet-4", cfg) == "text"
 
     def test_none_config_is_auto(self):
-        with patch("agent.image_routing._lookup_supports_vision", return_value=True):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=True):
             assert decide_image_input_mode("anthropic", "claude-sonnet-4", None) == "native"
 
     def test_invalid_mode_coerces_to_auto(self):
         cfg = {"agent": {"image_input_mode": "weird-value"}}
-        with patch("agent.image_routing._lookup_supports_vision", return_value=True):
+        with patch.object(_image_routing, "_lookup_supports_vision", return_value=True):
             assert decide_image_input_mode("anthropic", "claude-sonnet-4", cfg) == "native"
 
     def test_auto_uses_text_for_text_only_modalities_even_with_attachment_flag(self):
@@ -249,20 +250,20 @@ class TestLookupSupportsVisionOverride:
 
     def test_no_override_no_models_dev_entry_returns_none(self):
         with patch("agent.models_dev.get_model_capabilities", return_value=None), \
-             patch("agent.image_routing._should_probe_ollama_vision", return_value=False):
+             patch.object(_image_routing, "_should_probe_ollama_vision", return_value=False):
             assert _lookup_supports_vision("custom", "my-llava", {}) is None
 
     def test_ollama_probe_when_models_dev_missing(self):
         cfg = {"model": {"base_url": "http://localhost:11434/v1"}}
         with patch("agent.models_dev.get_model_capabilities", return_value=None), \
-             patch("agent.image_routing._should_probe_ollama_vision", return_value=True), \
+             patch.object(_image_routing, "_should_probe_ollama_vision", return_value=True), \
              patch("agent.model_metadata.query_ollama_supports_vision", return_value=True):
             assert _lookup_supports_vision("ollama", "gemma4:e2b", cfg) is True
 
     def test_ollama_probe_false_for_text_only_model(self):
         cfg = {"model": {"base_url": "http://localhost:11434/v1"}}
         with patch("agent.models_dev.get_model_capabilities", return_value=None), \
-             patch("agent.image_routing._should_probe_ollama_vision", return_value=True), \
+             patch.object(_image_routing, "_should_probe_ollama_vision", return_value=True), \
              patch("agent.model_metadata.query_ollama_supports_vision", return_value=False):
             assert _lookup_supports_vision("custom", "gemma4:31b", cfg) is False
 

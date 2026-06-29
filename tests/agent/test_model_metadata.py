@@ -10,11 +10,13 @@ Coverage levels:
   Persistent cache       — save/load, corruption, update, provider isolation
 """
 
+import sys
 import time
 
 import yaml
 from unittest.mock import patch, MagicMock
 
+import agent.model_metadata as _model_metadata
 from agent.model_metadata import (
     CONTEXT_PROBE_TIERS,
     DEFAULT_CONTEXT_LENGTHS,
@@ -757,6 +759,13 @@ class TestNousPortalContextResolution:
 # =========================================================================
 
 class TestGetModelContextLength:
+    def setup_method(self):
+        sys.modules["agent.model_metadata"] = _model_metadata
+        _model_metadata._model_metadata_cache.clear()
+        _model_metadata._model_metadata_cache_time = 0
+        _model_metadata._endpoint_model_metadata_cache.clear()
+        _model_metadata._endpoint_model_metadata_cache_time.clear()
+
     @patch("agent.model_metadata.fetch_model_metadata")
     def test_known_model_from_api(self, mock_fetch):
         mock_fetch.return_value = {
@@ -1105,14 +1114,14 @@ class TestStripProviderPrefix:
 
 class TestFetchModelMetadata:
     def _reset_cache(self):
-        import agent.model_metadata as mm
-        mm._model_metadata_cache = {}
-        mm._model_metadata_cache_time = 0
+        sys.modules["agent.model_metadata"] = _model_metadata
+        _model_metadata._model_metadata_cache = {}
+        _model_metadata._model_metadata_cache_time = 0
 
     def _isolate_disk_cache(self, monkeypatch, tmp_path):
-        import agent.model_metadata as mm
+        sys.modules["agent.model_metadata"] = _model_metadata
         cache_path = tmp_path / "openrouter_model_metadata.json"
-        monkeypatch.setattr(mm, "_get_model_metadata_cache_path", lambda: cache_path)
+        monkeypatch.setattr(_model_metadata, "_get_model_metadata_cache_path", lambda: cache_path)
         return cache_path
 
     def test_fresh_disk_cache_skips_network(self, tmp_path, monkeypatch):
@@ -1209,9 +1218,9 @@ class TestFetchModelMetadata:
     @patch("agent.model_metadata.requests.get")
     def test_api_failure_returns_stale_cache(self, mock_get):
         """On API failure with existing cache, stale data is returned."""
-        import agent.model_metadata as mm
-        mm._model_metadata_cache = {"old/model": {"context_length": 50000}}
-        mm._model_metadata_cache_time = 0  # expired
+        self._reset_cache()
+        _model_metadata._model_metadata_cache = {"old/model": {"context_length": 50000}}
+        _model_metadata._model_metadata_cache_time = 0  # expired
 
         mock_get.side_effect = Exception("Network error")
         result = fetch_model_metadata(force_refresh=True)
